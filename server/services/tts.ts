@@ -17,8 +17,8 @@ export async function generateSpeechStream(text: string): Promise<NodeJS.Readabl
             modelId: modelId,
             outputFormat: "mp3_44100_128",
             voiceSettings: {
-                stability: 0.5,
-                similarityBoost: 0.75,
+                stability: 0.7,
+                similarityBoost: 1,
             }
         });
 
