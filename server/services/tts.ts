@@ -1,4 +1,4 @@
-import axios from 'axios';
+import { ElevenLabsClient } from "elevenlabs";
 import { config } from '../config';
 
 export async function generateSpeechStream(text: string): Promise<NodeJS.ReadableStream> {
@@ -6,30 +6,21 @@ export async function generateSpeechStream(text: string): Promise<NodeJS.Readabl
         throw new Error("ELEVENLABS_API_KEY is missing");
     }
 
+    const client = new ElevenLabsClient({ apiKey: config.elevenLabsApiKey });
     const voiceId = config.voiceId || '21m00Tcm4TlvDq8ikWAM';
     const modelId = config.modelId || 'eleven_turbo_v2_5';
 
     try {
-        const response = await axios({
-            method: 'post',
-            url: `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`,
-            headers: {
-                'Accept': 'audio/mpeg',
-                'xi-api-key': config.elevenLabsApiKey,
-                'Content-Type': 'application/json',
-            },
-            data: {
-                text,
-                model_id: modelId,
-                voice_settings: {
-                    stability: 0.5,
-                    similarity_boost: 0.75,
-                }
-            },
-            responseType: 'stream'
+        const audioStream = await client.textToSpeech.convertAsStream(voiceId, {
+            text,
+            model_id: modelId,
+            voice_settings: {
+                stability: 0.5,
+                similarity_boost: 0.75,
+            }
         });
 
-        return response.data;
+        return audioStream as any as NodeJS.ReadableStream;
     } catch (error) {
         console.error('ElevenLabs API Error:', error);
         throw error;
