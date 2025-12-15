@@ -199,6 +199,9 @@ export class ChatWidget {
 
             try {
                 const sb = ms.addSourceBuffer(mimeType);
+                // Set mode to 'sequence' to handle segments with non-continuous timestamps (resets to 0)
+                // This forces the browser to play chunks in the order they are appended.
+                sb.mode = 'sequence';
                 this.sourceBuffer = sb;
 
                 sb.addEventListener('updateend', () => {
