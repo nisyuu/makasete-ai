@@ -8,6 +8,7 @@ export class ChatWidget {
     private audioQueue: ArrayBuffer[] = [];
     private isSourceOpen = false;
     private audio: HTMLAudioElement;
+    private isIOS = false; // Add flag for iOS detection
 
     // UI Elements
     private chatWindow: HTMLElement;
@@ -42,6 +43,11 @@ export class ChatWidget {
         } else {
             console.warn("MediaSource API not supported");
         }
+
+        // Detect iOS
+        const ua = navigator.userAgent;
+        this.isIOS = /iPhone|iPad|iPod/i.test(ua);
+        console.log('isIOS:', this.isIOS);
 
         this.audio = new Audio();
         // this.audio.src = URL.createObjectURL(this.mediaSource); // Postpone to interaction?
@@ -105,7 +111,12 @@ export class ChatWidget {
         // Clearing logic might be needed if user interrupts.
 
         // Send message with audio preference
-        this.socket.emit('user-input', { text, isVoiceInput: isVoice || this.isAudioEnabled });
+        // Also send isIOS flag so server knows to transcode if needed
+        this.socket.emit('user-input', {
+            text,
+            isVoiceInput: isVoice || this.isAudioEnabled,
+            isIOS: this.isIOS
+        });
     }
 
     private bindEvents() {
@@ -167,11 +178,19 @@ export class ChatWidget {
         const ms = this.mediaSource;
         ms.addEventListener('sourceopen', () => {
             this.isSourceOpen = true;
-            this.sourceBuffer = ms.addSourceBuffer('audio/mpeg');
-            this.sourceBuffer.addEventListener('updateend', () => {
+            // Use mp4a.40.2 (AAC) for iOS, otherwise default to audio/mpeg (MP3)
+            const mimeType = this.isIOS ? 'audio/mp4; codecs="mp4a.40.2"' : 'audio/mpeg';
+            console.log('Using MIME type:', mimeType);
+
+            try {
+                this.sourceBuffer = ms.addSourceBuffer(mimeType);
+                this.sourceBuffer.addEventListener('updateend', () => {
+                    this.processAudioQueue();
+                });
                 this.processAudioQueue();
-            });
-            this.processAudioQueue();
+            } catch (e) {
+                console.error('AddSourceBuffer Error:', e);
+            }
         });
 
         // Try to play (mute if needed?)

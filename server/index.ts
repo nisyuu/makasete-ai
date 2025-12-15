@@ -7,6 +7,7 @@ import { config } from './config';
 import { fetchProducts, getProducts, fetchNews, getNews } from './services/sheets';
 import { generateResponseStream } from './services/gemini';
 import { generateSpeechStream } from './services/tts';
+import { transcodeToFmp4 } from './services/transcode';
 import { StreamBuffer } from './utils/streamBuffer';
 
 const app = express();
@@ -51,9 +52,9 @@ io.on('connection', (socket) => {
     console.log('Client connected:', socket.id);
     let chatHistory: any[] = [];
 
-    socket.on('user-input', async (data: { text: string; isVoiceInput: boolean }) => {
-        const { text, isVoiceInput } = data;
-        console.log(`Received input: ${text}, isVoice: ${isVoiceInput}`);
+    socket.on('user-input', async (data: { text: string; isVoiceInput: boolean; isIOS?: boolean }) => {
+        const { text, isVoiceInput, isIOS } = data;
+        console.log(`Received input: ${text}, isVoice: ${isVoiceInput}, isIOS: ${isIOS}`);
 
         // Add user message to history
         chatHistory.push({ role: "user", parts: [{ text }] });
@@ -74,14 +75,14 @@ io.on('connection', (socket) => {
                 const sentences = streamBuffer.add(chunkText);
 
                 for (const sentence of sentences) {
-                    await processSentence(socket, sentence, isVoiceInput);
+                    await processSentence(socket, sentence, isVoiceInput, isIOS);
                 }
             }
 
             // Flush remaining buffer
             const remaining = streamBuffer.flush();
             if (remaining) {
-                await processSentence(socket, remaining, isVoiceInput);
+                await processSentence(socket, remaining, isVoiceInput, isIOS);
             }
 
             // Add model response to history
@@ -102,7 +103,7 @@ io.on('connection', (socket) => {
     });
 });
 
-async function processSentence(socket: Socket, sentence: string, isVoiceInput: boolean) {
+async function processSentence(socket: Socket, sentence: string, isVoiceInput: boolean, isIOS = false) {
     // Determine if we should send audio or just text
     if (isVoiceInput) {
         // Send text first (for UI display)
@@ -112,7 +113,13 @@ async function processSentence(socket: Socket, sentence: string, isVoiceInput: b
             // Generate Audio
             // Remove markdown links for TTS (e.g. "[Book Title](/books/1)" -> "Book Title")
             const cleanSentence = removeMarkdownLinks(sentence);
-            const audioStream = await generateSpeechStream(cleanSentence);
+            let audioStream: NodeJS.ReadableStream = await generateSpeechStream(cleanSentence);
+
+            // Transcode if iOS
+            if (isIOS) {
+                console.log(`Transcoding to fMP4 for iOS: "${cleanSentence.substring(0, 20)}..."`);
+                audioStream = transcodeToFmp4(audioStream as any) as any;
+            }
 
             // Stream audio chunks
             audioStream.on('data', (chunk: Buffer) => {
