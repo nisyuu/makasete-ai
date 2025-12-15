@@ -16,6 +16,10 @@ export async function generateSpeechStream(text: string): Promise<NodeJS.Readabl
             text,
             modelId: modelId,
             outputFormat: "mp3_44100_128",
+            voiceSettings: {
+                stability: 0.5,
+                similarityBoost: 0.75,
+            }
         });
 
         // Check if stream needs conversion (e.g. if it is a Web Stream or just Async Iterable)
