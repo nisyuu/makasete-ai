@@ -3,7 +3,7 @@ import { io, Socket } from 'socket.io-client';
 export class ChatWidget {
     private shadowRoot: ShadowRoot;
     private socket: Socket;
-    private mediaSource: MediaSource;
+    private mediaSource: MediaSource | null = null;
     private sourceBuffer: SourceBuffer | null = null;
     private audioQueue: ArrayBuffer[] = [];
     private isSourceOpen = false;
@@ -37,7 +37,12 @@ export class ChatWidget {
         this.audioToggleBtn = this.shadowRoot.querySelector('.audio-toggle-btn') as HTMLButtonElement;
 
         // Audio setup
-        this.mediaSource = new MediaSource();
+        if ('MediaSource' in window) {
+            this.mediaSource = new MediaSource();
+        } else {
+            console.warn("MediaSource API not supported");
+        }
+
         this.audio = new Audio();
         // this.audio.src = URL.createObjectURL(this.mediaSource); // Postpone to interaction?
         // Actually, we can just init it but browser might block autoplay unless interactions.
@@ -155,13 +160,14 @@ export class ChatWidget {
     }
 
     private initAudio() {
-        if (this.audio.src) return; // Already init
+        if (!this.mediaSource || this.audio.src) return; // Already init or no support
 
         this.audio.src = URL.createObjectURL(this.mediaSource);
 
-        this.mediaSource.addEventListener('sourceopen', () => {
+        const ms = this.mediaSource;
+        ms.addEventListener('sourceopen', () => {
             this.isSourceOpen = true;
-            this.sourceBuffer = this.mediaSource.addSourceBuffer('audio/mpeg');
+            this.sourceBuffer = ms.addSourceBuffer('audio/mpeg');
             this.sourceBuffer.addEventListener('updateend', () => {
                 this.processAudioQueue();
             });
