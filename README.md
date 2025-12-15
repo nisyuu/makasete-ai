@@ -15,7 +15,7 @@ Google GeminiとElevenLabsを活用した、ECサイト向け音声対話チャ�
 ### フロントエンド (Widget)
 - **技術スタック**: Vanilla TypeScript, Web Components (Shadow DOM), CSS
 - **音声認識**: ブラウザ標準の Web Speech API を使用し、ユーザーの発話をテキスト化してサーバーへ送信します。
-- **音声再生**: Web Audio API (`AudioContext`) を使用し、サーバーからストリーミングされる音声データをリアルタイムに再生します。iOS (Safari) を含む全ブラウザに対応しています。
+- **音声再生**: MediaSource API (`audio/mpeg`) を使用し、サーバーからストリーミングされる音声データを順次バッファリングして再生します。
 - **通信**: Socket.io Client を使用し、低遅延な双方向通信を実現しています。
 
 ### バックエンド (Server)

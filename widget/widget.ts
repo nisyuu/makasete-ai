@@ -3,11 +3,11 @@ import { io, Socket } from 'socket.io-client';
 export class ChatWidget {
     private shadowRoot: ShadowRoot;
     private socket: Socket;
-    private audioContext: AudioContext | null = null;
-    private nextStartTime: number = 0;
+    private mediaSource: MediaSource;
+    private sourceBuffer: SourceBuffer | null = null;
     private audioQueue: ArrayBuffer[] = [];
-    private isDecoding = false;
-    private isPlaying = false;
+    private isSourceOpen = false;
+    private audio: HTMLAudioElement;
 
     // UI Elements
     private chatWindow: HTMLElement;
@@ -36,7 +36,12 @@ export class ChatWidget {
         this.launcherBtn = this.shadowRoot.querySelector('.launcher-button') as HTMLButtonElement;
         this.audioToggleBtn = this.shadowRoot.querySelector('.audio-toggle-btn') as HTMLButtonElement;
 
-        // Audio initialization on user interaction
+        // Audio setup
+        this.mediaSource = new MediaSource();
+        this.audio = new Audio();
+        // this.audio.src = URL.createObjectURL(this.mediaSource); // Postpone to interaction?
+        // Actually, we can just init it but browser might block autoplay unless interactions.
+        // Let's bind it.
 
         this.initSocket();
         this.bindEvents();
@@ -63,11 +68,8 @@ export class ChatWidget {
         });
 
         this.socket.on('response-complete', () => {
-            // Force play remaining chunks if initial buffer wasn't reached
-            if (!this.isPlaying && this.audioQueue.length > 0) {
-                this.isPlaying = true;
-                this.processAudioQueue();
-            }
+            // End of turn (for MSE, we might signal end of stream if needed, 
+            // but usually we just keep it open or let it finish playing buffer)
         });
 
         this.socket.on('error', (data: { message: string }) => {
@@ -93,9 +95,9 @@ export class ChatWidget {
         this.showTypingIndicator();
 
         // Reset audio state for new turn
-        this.isPlaying = false;
-        this.audioQueue = []; // Clear any old chunks
-        this.nextStartTime = 0;
+        // For simple MSE, we might just clear queue if something is pending,
+        // but typically we append to flow. 
+        // Clearing logic might be needed if user interrupts.
 
         // Send message with audio preference
         this.socket.emit('user-input', { text, isVoiceInput: isVoice || this.isAudioEnabled });
@@ -105,8 +107,8 @@ export class ChatWidget {
         this.launcherBtn.addEventListener('click', () => {
             this.chatWindow.classList.toggle('open');
             if (this.chatWindow.classList.contains('open')) {
-                // Initialize audio context/source on user interaction to unlock autoplay policies
-                this.initAudioContext();
+                // Initialize audio on user interaction to unlock autoplay policies
+                this.initAudio();
             }
         });
 
@@ -132,7 +134,7 @@ export class ChatWidget {
 
             // Note: If turning ON, we might want to check/resume context, but usually it's fine until next play.
             if (this.isAudioEnabled) {
-                this.initAudioContext();
+                this.initAudio();
             }
         });
     }
@@ -152,85 +154,46 @@ export class ChatWidget {
         }
     }
 
-    private initAudioContext() {
-        if (!this.audioContext) {
-            // @ts-ignore
-            const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-            this.audioContext = new AudioContextClass();
-        }
+    private initAudio() {
+        if (this.audio.src) return; // Already init
 
-        if (this.audioContext.state === 'suspended') {
-            this.audioContext.resume().then(() => {
-                // Resume success
+        this.audio.src = URL.createObjectURL(this.mediaSource);
+
+        this.mediaSource.addEventListener('sourceopen', () => {
+            this.isSourceOpen = true;
+            this.sourceBuffer = this.mediaSource.addSourceBuffer('audio/mpeg');
+            this.sourceBuffer.addEventListener('updateend', () => {
                 this.processAudioQueue();
             });
-        }
+            this.processAudioQueue();
+        });
+
+        // Try to play (mute if needed?)
+        this.audio.play().catch(e => console.log('Autoplay blocked:', e));
     }
 
     private handleAudioChunk(content: ArrayBuffer | string) {
-        // Queue chunk
         this.audioQueue.push(content as ArrayBuffer);
 
-        if (!this.audioContext || this.audioContext.state !== 'running') {
+        if (!this.isSourceOpen || !this.sourceBuffer) {
+            // Wait for sourceopen
             return;
         }
 
-        // Initial Buffering Strategy:
-        // Wait for 5 chunks to accumulate before starting playback to prevent stuttering.
-        // Once playing, process immediately.
-        if (!this.isPlaying) {
-            if (this.audioQueue.length >= 5) {
-                this.isPlaying = true;
-                this.processAudioQueue();
-            }
-        } else {
-            this.processAudioQueue();
-        }
+        this.processAudioQueue();
     }
 
     private processAudioQueue() {
-        if (!this.audioContext || this.isDecoding || this.audioQueue.length === 0) return;
-
-        const chunk = this.audioQueue.shift();
-        if (chunk) {
-            this.isDecoding = true;
-            this.decodeAndPlay(chunk);
-        }
-    }
-
-    private decodeAndPlay(data: ArrayBuffer) {
-        if (!this.audioContext) {
-            this.isDecoding = false;
-            return;
-        }
-
-        // Clone buffer because decodeAudioData detaches it
-        const bufferCopy = data.slice(0);
-
-        this.audioContext.decodeAudioData(bufferCopy, (decodedBuffer) => {
-            const source = this.audioContext!.createBufferSource();
-            source.buffer = decodedBuffer;
-            source.connect(this.audioContext!.destination);
-
-            const now = this.audioContext!.currentTime;
-
-            // Jitter Buffer Logic:
-            // If nextStartTime is in the past (underrun), play immediately (catch up).
-            // Do NOT add artificial delay (+0.2) as it causes gaps.
-            if (this.nextStartTime < now) {
-                this.nextStartTime = now;
+        if (this.audioQueue.length > 0 && this.sourceBuffer && !this.sourceBuffer.updating) {
+            const chunk = this.audioQueue.shift();
+            if (chunk) {
+                try {
+                    this.sourceBuffer.appendBuffer(chunk);
+                } catch (e) {
+                    console.error('SourceBuffer append error:', e);
+                }
             }
-
-            source.start(this.nextStartTime);
-            this.nextStartTime += decodedBuffer.duration;
-
-            this.isDecoding = false;
-            this.processAudioQueue(); // Process next chunk
-        }, (e) => {
-            console.error("Audio Decode Error", e);
-            this.isDecoding = false;
-            this.processAudioQueue(); // Continue even if error
-        });
+        }
     }
     private initSpeechRecognition() {
         // @ts-ignore
