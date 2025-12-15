@@ -3,11 +3,9 @@ import { io, Socket } from 'socket.io-client';
 export class ChatWidget {
     private shadowRoot: ShadowRoot;
     private socket: Socket;
-    private mediaSource: MediaSource | null = null;
-    private sourceBuffer: SourceBuffer | null = null;
+    private audioContext: AudioContext | null = null;
+    private nextStartTime: number = 0;
     private audioQueue: ArrayBuffer[] = [];
-    private isPlaying = false;
-    private audioElement: HTMLAudioElement;
 
     // UI Elements
     private chatWindow: HTMLElement;
@@ -36,9 +34,7 @@ export class ChatWidget {
         this.launcherBtn = this.shadowRoot.querySelector('.launcher-button') as HTMLButtonElement;
         this.audioToggleBtn = this.shadowRoot.querySelector('.audio-toggle-btn') as HTMLButtonElement;
 
-        // Audio Element (invisible)
-        this.audioElement = document.createElement('audio');
-        this.shadowRoot.appendChild(this.audioElement);
+        // Audio initialization on user interaction
 
         this.initSocket();
         this.bindEvents();
@@ -91,7 +87,7 @@ export class ChatWidget {
         this.showTypingIndicator();
 
         // Send message with audio preference
-        this.socket.emit('user-input', { text, isVoiceInput: this.isAudioEnabled });
+        this.socket.emit('user-input', { text, isVoiceInput: isVoice || this.isAudioEnabled });
     }
 
     private bindEvents() {
@@ -146,71 +142,66 @@ export class ChatWidget {
     }
 
     private initAudioContext() {
-        if (this.mediaSource) return; // Already initialized
+        if (!this.audioContext) {
+            // @ts-ignore
+            const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+            this.audioContext = new AudioContextClass();
+        }
 
-        this.mediaSource = new MediaSource();
-        this.audioElement.src = URL.createObjectURL(this.mediaSource);
-
-        this.mediaSource.addEventListener('sourceopen', () => {
-            // For MP3. Note: not all browsers support 'audio/mpeg' in MediaSource (e.g. Firefox might need configuration, Chrome is usually ok).
-            // If issues arise, consider 'audio/mp4; codecs="mp4a.40.2"' but re-encoding might be needed.
-            // Chrome supports audio/mpeg.
-            try {
-                this.sourceBuffer = this.mediaSource!.addSourceBuffer('audio/mpeg');
-                this.sourceBuffer.addEventListener('updateend', () => {
-                    this.processAudioQueue();
-                });
-            } catch (e) {
-                console.error("MediaSource addSourceBuffer error", e);
-            }
-        });
-
-        this.mediaSource.addEventListener('sourceclose', () => {
-            console.warn("MediaSource closed");
-        });
-        this.mediaSource.addEventListener('error', (e) => {
-            console.error("MediaSource error", e);
-        });
+        if (this.audioContext.state === 'suspended') {
+            this.audioContext.resume().then(() => {
+                // Resume success
+                this.processAudioQueue();
+            });
+        }
     }
 
     private handleAudioChunk(content: ArrayBuffer | string) {
-
-        // If content is pure buffer
+        // Queue chunk
         this.audioQueue.push(content as ArrayBuffer);
-        this.processAudioQueue();
 
-        // Attempt play
-        this.playAudio();
-    }
-
-    private processAudioQueue() {
-        if (!this.sourceBuffer || this.sourceBuffer.updating || this.audioQueue.length === 0) {
+        if (!this.audioContext || this.audioContext.state !== 'running') {
+            // If context is not ready, we just queue.
+            // Try to init if not exists (though typically requires user gesture)
+            // If we are already in a flow where the user clicked, we might be able to resume.
+            // But usually initAudioContext is called on button clicks.
             return;
         }
 
-        const chunk = this.audioQueue.shift();
-        if (chunk) {
-            try {
-                this.sourceBuffer.appendBuffer(chunk);
-            } catch (e) {
-                console.error("AppendBuffer Error", e);
+        this.processAudioQueue();
+    }
+
+    private processAudioQueue() {
+        if (!this.audioContext) return;
+
+        while (this.audioQueue.length > 0) {
+            const chunk = this.audioQueue.shift();
+            if (chunk) {
+                this.decodeAndPlay(chunk);
             }
         }
     }
 
-    private playAudio() {
-        if (this.audioElement.paused) {
-            this.audioElement.play()
-                .then(() => {
-                    this.isPlaying = true;
-                })
-                .catch(e => {
-                    console.error("Auto-play prevented (User interaction required?)", e);
-                    // Try resuming context if web audio API was used (not here, but good practice)
-                });
-        }
-    }
+    private decodeAndPlay(data: ArrayBuffer) {
+        if (!this.audioContext) return;
 
+        // Clone buffer because decodeAudioData detaches it
+        const bufferCopy = data.slice(0);
+
+        this.audioContext.decodeAudioData(bufferCopy, (decodedBuffer) => {
+            const source = this.audioContext!.createBufferSource();
+            source.buffer = decodedBuffer;
+            source.connect(this.audioContext!.destination);
+
+            const now = this.audioContext!.currentTime;
+            // Schedule next chunk
+            const startTime = Math.max(now, this.nextStartTime);
+            source.start(startTime);
+            this.nextStartTime = startTime + decodedBuffer.duration;
+        }, (e) => {
+            console.error("Audio Decode Error", e);
+        });
+    }
     private initSpeechRecognition() {
         // @ts-ignore
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -265,7 +256,7 @@ export class ChatWidget {
                 .replace(/</g, "&lt;")
                 .replace(/>/g, "&gt;");
 
-            return safeText.replace(/\[((?:[^\[\]]|\[[^\]]*\])+)\]\(([^)]+)\)/g, (match, linkText, url) => {
+            return safeText.replace(/\[((?:[^\[\]]|\[[^\]]*\])+)\]\(([^)]+)\)/g, (_match, linkText, url) => {
                 return `<a href="${url}" target="_blank" rel="noopener noreferrer">${linkText}</a>`;
             });
         };
