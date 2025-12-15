@@ -14,6 +14,17 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@elevenlabs/elevenlabs-js@npm:^2.28.0":
+  version: 2.28.0
+  resolution: "@elevenlabs/elevenlabs-js@npm:2.28.0"
+  dependencies:
+    command-exists: "npm:^1.2.9"
+    node-fetch: "npm:^2.7.0"
+    ws: "npm:^8.18.3"
+  checksum: 10c0/bec0951d2afa63cba501668e583904ff3e38dafabd2738d50178c4baab1e1c5a7abb3c31a1098d8afc263aa6c8fd681ed1f6daaf07e63580ebf7372a42adc08b
+  languageName: node
+  linkType: hard
+
 "@esbuild/aix-ppc64@npm:0.21.5":
   version: 0.21.5
   resolution: "@esbuild/aix-ppc64@npm:0.21.5"
@@ -1081,6 +1092,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "ec-voice-assistant@workspace:."
   dependencies:
+    "@elevenlabs/elevenlabs-js": "npm:^2.28.0"
     "@google/generative-ai": "npm:^0.24.1"
     "@types/cors": "npm:^2.8.17"
     "@types/express": "npm:^4.17.21"
@@ -3245,6 +3257,21 @@ __metadata:
     string-width: "npm:^4.1.0"
     strip-ansi: "npm:^6.0.0"
   checksum: 10c0/d15fc12c11e4cbc4044a552129ebc75ee3f57aa9c1958373a4db0292d72282f54373b536103987a4a7594db1ef6a4f10acf92978f79b98c49306a4b58c77d4da
+  languageName: node
+  linkType: hard
+
+"ws@npm:^8.18.3":
+  version: 8.18.3
+  resolution: "ws@npm:8.18.3"
+  peerDependencies:
+    bufferutil: ^4.0.1
+    utf-8-validate: ">=5.0.2"
+  peerDependenciesMeta:
+    bufferutil:
+      optional: true
+    utf-8-validate:
+      optional: true
+  checksum: 10c0/eac918213de265ef7cb3d4ca348b891a51a520d839aa51cdb8ca93d4fa7ff9f6ccb339ccee89e4075324097f0a55157c89fa3f7147bde9d8d7e90335dc087b53
   languageName: node
   linkType: hard
 

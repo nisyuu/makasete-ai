@@ -12,11 +12,11 @@
     "start:prod": "node dist/server/index.js"
   },
   "dependencies": {
+    "@elevenlabs/elevenlabs-js": "^2.28.0",
     "@google/generative-ai": "^0.24.1",
     "axios": "^1.6.0",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
-    "elevenlabs": "^1.59.0",
     "express": "^4.18.2",
     "googleapis": "^128.0.0",
     "socket.io": "^4.7.2",

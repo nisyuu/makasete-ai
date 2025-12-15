@@ -7,5 +7,5 @@ export const config = {
     geminiApiKey: process.env.GEMINI_API_KEY,
     elevenLabsApiKey: process.env.ELEVENLABS_API_KEY,
     voiceId: 'AYFJOmHxRJdmf572TQ7R',
-    modelId: 'eleven_turbo_v2_5',
+    modelId: 'eleven_flash_v2_5',
 };

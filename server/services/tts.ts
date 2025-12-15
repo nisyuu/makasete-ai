@@ -1,4 +1,4 @@
-import { ElevenLabsClient } from "elevenlabs";
+import { ElevenLabsClient } from "@elevenlabs/elevenlabs-js";
 import { Readable } from 'stream';
 import { config } from '../config';
 
@@ -9,16 +9,13 @@ export async function generateSpeechStream(text: string): Promise<NodeJS.Readabl
 
     const client = new ElevenLabsClient({ apiKey: config.elevenLabsApiKey });
     const voiceId = config.voiceId || '21m00Tcm4TlvDq8ikWAM';
-    const modelId = config.modelId || 'eleven_turbo_v2_5';
+    const modelId = config.modelId || 'eleven_flash_v2_5';
 
     try {
-        const audioStream = await client.textToSpeech.convertAsStream(voiceId, {
+        const audioStream = await client.textToSpeech.convert(voiceId, {
             text,
-            model_id: modelId,
-            voice_settings: {
-                stability: 0.5,
-                similarity_boost: 0.75,
-            }
+            modelId: modelId,
+            outputFormat: "mp3_44100_128",
         });
 
         // Check if stream needs conversion (e.g. if it is a Web Stream or just Async Iterable)
