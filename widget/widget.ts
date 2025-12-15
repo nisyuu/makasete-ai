@@ -198,14 +198,15 @@ export class ChatWidget {
             console.log(`[AudioInit] Supported: ${isSupported}`);
 
             try {
-                this.sourceBuffer = ms.addSourceBuffer(mimeType);
+                const sb = ms.addSourceBuffer(mimeType);
+                this.sourceBuffer = sb;
 
-                this.sourceBuffer.addEventListener('updateend', () => {
+                sb.addEventListener('updateend', () => {
                     // console.log(`[SourceBuffer] UpdateEnd. Buffered: ${this.getBufferedRanges()}`);
                     this.processAudioQueue();
                 });
 
-                this.sourceBuffer.addEventListener('error', (e) => {
+                sb.addEventListener('error', (e: Event) => {
                     console.error('[SourceBuffer] Error:', e);
                 });
 
