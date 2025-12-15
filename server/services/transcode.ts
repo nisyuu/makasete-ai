@@ -21,13 +21,14 @@ export function transcodeToFmp4(inputStream: Readable): Readable {
         .inputFormat('mp3')
         .audioCodec('aac')
         .format('mp4')
-        // Important flags for MSE:
-        // frag_keyframe: Fragment at keyframes
-        // empty_moov: Write an empty moov atom at the beginning (required for streaming)
-        // default_base_moof: Improve compatibility
+        // keyframe+empty_moov+default_base_moof is standard for fMP4 streaming to MSE
+        // -ar 44100: Force 44.1kHz (safe)
+        // -ac 2: Force stereo (safe)
         .outputOptions([
             '-movflags frag_keyframe+empty_moov+default_base_moof',
-            '-b:a 128k' // Bitrate 128k
+            '-b:a 128k',
+            '-ar 44100',
+            '-ac 2'
         ])
         .on('error', (err) => {
             console.error('FFmpeg error:', err);

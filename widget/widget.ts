@@ -178,18 +178,26 @@ export class ChatWidget {
         const ms = this.mediaSource;
         ms.addEventListener('sourceopen', () => {
             this.isSourceOpen = true;
-            // Use mp4a.40.2 (AAC) for iOS, otherwise default to audio/mpeg (MP3)
+            // Use mp4a.40.2 (AAC LC) which is standard. warning: iOS strict about MIME.
             const mimeType = this.isIOS ? 'audio/mp4; codecs="mp4a.40.2"' : 'audio/mpeg';
-            console.log('Using MIME type:', mimeType);
+            console.log(`[AudioInit] isIOS: ${this.isIOS}, MIME: ${mimeType}`);
+            console.log(`[AudioInit] Supported: ${MediaSource.isTypeSupported(mimeType)}`);
 
             try {
                 this.sourceBuffer = ms.addSourceBuffer(mimeType);
+
                 this.sourceBuffer.addEventListener('updateend', () => {
+                    // console.log(`[SourceBuffer] UpdateEnd. Buffered: ${this.getBufferedRanges()}`);
                     this.processAudioQueue();
                 });
+
+                this.sourceBuffer.addEventListener('error', (e) => {
+                    console.error('[SourceBuffer] Error:', e);
+                });
+
                 this.processAudioQueue();
             } catch (e) {
-                console.error('AddSourceBuffer Error:', e);
+                console.error('[SourceBuffer] AddSourceBuffer Failed:', e);
             }
         });
 
@@ -213,12 +221,23 @@ export class ChatWidget {
             const chunk = this.audioQueue.shift();
             if (chunk) {
                 try {
+                    // console.log(`[SourceBuffer] Appending chunk: ${chunk.byteLength} bytes`);
                     this.sourceBuffer.appendBuffer(chunk);
                 } catch (e) {
-                    console.error('SourceBuffer append error:', e);
+                    console.error('[SourceBuffer] Append Error:', e);
                 }
             }
         }
+    }
+
+    private getBufferedRanges(): string {
+        if (!this.sourceBuffer) return 'No SourceBuffer';
+        const ranges = this.sourceBuffer.buffered;
+        const result: string[] = [];
+        for (let i = 0; i < ranges.length; i++) {
+            result.push(`[${ranges.start(i).toFixed(2)}, ${ranges.end(i).toFixed(2)}]`);
+        }
+        return result.join(', ');
     }
     private initSpeechRecognition() {
         // @ts-ignore
