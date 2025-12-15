@@ -25,6 +25,7 @@ export async function generateSpeechStream(text: string): Promise<NodeJS.Readabl
         // Check if stream needs conversion (e.g. if it is a Web Stream or just Async Iterable)
         // The SDK might return a Node stream or a standard Web Stream depending on valid types.
         // We use Readable.from() to ensure it is a Node.js Readable stream.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const nodeStream = Readable.from(audioStream as any);
         return nodeStream;
     } catch (error) {

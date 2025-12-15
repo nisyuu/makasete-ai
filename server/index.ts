@@ -1,6 +1,6 @@
 import express, { Request, Response } from 'express';
 import { createServer } from 'http';
-import { Server } from 'socket.io';
+import { Server, Socket } from 'socket.io';
 import cors from 'cors';
 import path from 'path';
 import { config } from './config';
@@ -50,7 +50,8 @@ Promise.all([fetchProducts(), fetchNews()]).then(() => {
 // WebSocket logic
 io.on('connection', (socket) => {
     console.log('Client connected:', socket.id);
-    let chatHistory: any[] = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const chatHistory: any[] = [];
 
     socket.on('user-input', async (data: { text: string; isVoiceInput: boolean; isIOS?: boolean }) => {
         const { text, isVoiceInput, isIOS } = data;
@@ -91,6 +92,7 @@ io.on('connection', (socket) => {
             // Signal end of turn
             socket.emit('response-complete');
 
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } catch (error: any) {
             console.error("Error processing input:", error);
             const errorMessage = error?.message || "Unknown error";
@@ -117,6 +119,7 @@ async function processSentence(socket: Socket, sentence: string, isVoiceInput: b
 
             // Transcode if iOS
             if (isIOS) {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 audioStream = transcodeToFmp4(audioStream as any) as any;
             }
 
@@ -151,9 +154,9 @@ httpServer.listen(PORT, () => {
 });
 
 // Define Socket type for helper function
-type Socket = any;
+
 
 function removeMarkdownLinks(text: string): string {
     // Replaces [Link Text](URL) with Link Text
-    return text.replace(/\[((?:[^\[\]]|\[[^\]]*\])+)\]\(([^)]+)\)/g, '$1');
+    return text.replace(/\[((?:[^[\]]|\[[^\]]*\])+)\]\(([^)]+)\)/g, '$1');
 } 

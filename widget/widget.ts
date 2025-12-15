@@ -3,7 +3,7 @@ import { io, Socket } from 'socket.io-client';
 export class ChatWidget {
     private shadowRoot: ShadowRoot;
     private socket: Socket;
-    // @ts-ignore
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     private mediaSource: MediaSource | any;
     private sourceBuffer: SourceBuffer | null = null;
     private audioQueue: ArrayBuffer[] = [];
@@ -23,6 +23,7 @@ export class ChatWidget {
     // State
     private isRecording = false;
     private isAudioEnabled = false; // Default OFF
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     private recognition: any = null; // Web Speech API
 
     constructor(shadowRoot: ShadowRoot, serverUrl: string) {
@@ -39,6 +40,7 @@ export class ChatWidget {
         this.audioToggleBtn = this.shadowRoot.querySelector('.audio-toggle-btn') as HTMLButtonElement;
 
         // Audio setup
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const MediaSourceClass = window.MediaSource || (window as any).ManagedMediaSource;
         if (MediaSourceClass) {
             this.mediaSource = new MediaSourceClass();
@@ -52,7 +54,6 @@ export class ChatWidget {
 
         this.audio = new Audio();
         // ManagedMediaSource requires disableRemotePlayback for accurate local control
-        // @ts-ignore
         this.audio.disableRemotePlayback = true;
         // this.audio.src = URL.createObjectURL(this.mediaSource); // Postpone to interaction?
         // Actually, we can just init it but browser might block autoplay unless interactions.
@@ -74,6 +75,7 @@ export class ChatWidget {
             this.appendMessage('bot', data.content, true);
         });
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         this.socket.on('audio-chunk', (data: { type: 'text' | 'audio', content: any }) => {
             if (data.type === 'text') {
                 this.appendMessage('bot', data.content, true);
@@ -180,7 +182,6 @@ export class ChatWidget {
         this.audio.src = URL.createObjectURL(this.mediaSource);
 
         const ms = this.mediaSource;
-        const MediaSourceClass = window.MediaSource || (window as any).ManagedMediaSource;
 
         ms.addEventListener('sourceopen', () => {
             this.isSourceOpen = true;
@@ -241,7 +242,7 @@ export class ChatWidget {
 
 
     private initSpeechRecognition() {
-        // @ts-ignore
+        // @ts-expect-error: SpeechRecognition might not be in window
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (SpeechRecognition) {
             this.recognition = new SpeechRecognition();
@@ -249,6 +250,7 @@ export class ChatWidget {
             this.recognition.continuous = false;
             this.recognition.interimResults = false;
 
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             this.recognition.onresult = (event: any) => {
                 const text = event.results[0][0].transcript;
                 this.input.value = text;
@@ -289,12 +291,12 @@ export class ChatWidget {
         const formatText = (rawText: string) => {
             // Regex to match [text](url)
             // We escape HTML characters first to prevent XSS from raw text, then replace markdown links
-            let safeText = rawText
+            const safeText = rawText
                 .replace(/&/g, "&amp;")
                 .replace(/</g, "&lt;")
                 .replace(/>/g, "&gt;");
 
-            return safeText.replace(/\[((?:[^\[\]]|\[[^\]]*\])+)\]\(([^)]+)\)/g, (_match, linkText, url) => {
+            return safeText.replace(/\[((?:[^[\]]|\[[^\]]*\])+)\]\(([^)]+)\)/g, (_match, linkText, url) => {
                 return `<a href="${url}" target="_blank" rel="noopener noreferrer">${linkText}</a>`;
             });
         };

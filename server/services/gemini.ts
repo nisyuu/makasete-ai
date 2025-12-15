@@ -3,6 +3,7 @@ import { config } from "../config";
 import { getProducts } from "./sheets";
 
 let genAI: GoogleGenerativeAI;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let model: any;
 
 export function initGemini() {
@@ -17,6 +18,7 @@ export function initGemini() {
     model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function generateResponseStream(prompt: string, history: any[] = []) {
     if (!model) {
         initGemini();

@@ -40,6 +40,7 @@ export async function fetchProducts(): Promise<Product[]> {
         const keyName = 'tasukari-4170ed37d5cd.json';
         const absoluteKeyPath = path.join(process.cwd(), keyName);
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const authConfig: any = {
             scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
         };
@@ -54,6 +55,7 @@ export async function fetchProducts(): Promise<Product[]> {
         const auth = new google.auth.GoogleAuth(authConfig);
 
         const client = await auth.getClient();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const sheets = google.sheets({ version: 'v4', auth: client as any });
 
         const response = await sheets.spreadsheets.values.get({
@@ -99,6 +101,7 @@ export async function fetchNews(): Promise<News[]> {
         const keyName = 'tasukari-4170ed37d5cd.json';
         const absoluteKeyPath = path.join(process.cwd(), keyName);
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const authConfig: any = {
             scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
         };
@@ -110,6 +113,7 @@ export async function fetchNews(): Promise<News[]> {
         const auth = new google.auth.GoogleAuth(authConfig);
 
         const client = await auth.getClient();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const sheets = google.sheets({ version: 'v4', auth: client as any });
 
         const response = await sheets.spreadsheets.values.get({

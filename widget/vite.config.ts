@@ -9,7 +9,7 @@ export default defineConfig({
         lib: {
             entry: path.resolve(__dirname, 'main.ts'),
             name: 'ECVoiceWidget',
-            fileName: (format) => `widget.js`, // Force simple filename
+            fileName: () => `widget.js`, // Force simple filename
             formats: ['iife'], // IIFE is best for direct script tag inclusion without modules
         },
         rollupOptions: {
