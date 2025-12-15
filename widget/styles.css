@@ -276,10 +276,13 @@
 }
 
 @media (max-width: 600px) {
-
-  .send-btn,
   .mic-btn {
     padding: 12px;
-    font-size: 20px;
+    font-size: 14px;
+  }
+
+  .send-btn {
+    padding: 12px;
+    font-size: 17px;
   }
 }
