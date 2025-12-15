@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import { google } from 'googleapis';
 import { config } from '../config';
 
@@ -32,13 +34,24 @@ export async function fetchProducts(): Promise<Product[]> {
     try {
         // Setup Google Sheets API
         // Authentication strategy:
-        // 1. If key.json is present (for local dev), set GOOGLE_APPLICATION_CREDENTIALS env var to point to it.
-        // 2. On Cloud Run, it uses the attached Service Account automatically.
+        // 1. If key.json is present (for local dev), set keyFilename.
+        // 2. If missing (Cloud Run), use ADC (empty config).
 
-        const auth = new google.auth.GoogleAuth({
-            keyFilename: 'tasukari-4170ed37d5cd.json',
+        const keyName = 'tasukari-4170ed37d5cd.json';
+        const absoluteKeyPath = path.join(process.cwd(), keyName);
+
+        const authConfig: any = {
             scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
-        });
+        };
+
+        if (fs.existsSync(absoluteKeyPath)) {
+            console.log("Using local key file for Sheets Auth");
+            authConfig.keyFilename = absoluteKeyPath;
+        } else {
+            console.log("Using ADC for Sheets Auth");
+        }
+
+        const auth = new google.auth.GoogleAuth(authConfig);
 
         const client = await auth.getClient();
         const sheets = google.sheets({ version: 'v4', auth: client as any });
@@ -83,10 +96,18 @@ export async function fetchNews(): Promise<News[]> {
     }
 
     try {
-        const auth = new google.auth.GoogleAuth({
-            keyFilename: 'tasukari-4170ed37d5cd.json',
+        const keyName = 'tasukari-4170ed37d5cd.json';
+        const absoluteKeyPath = path.join(process.cwd(), keyName);
+
+        const authConfig: any = {
             scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
-        });
+        };
+
+        if (fs.existsSync(absoluteKeyPath)) {
+            authConfig.keyFilename = absoluteKeyPath;
+        }
+
+        const auth = new google.auth.GoogleAuth(authConfig);
 
         const client = await auth.getClient();
         const sheets = google.sheets({ version: 'v4', auth: client as any });
