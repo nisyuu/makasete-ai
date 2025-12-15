@@ -36,13 +36,6 @@ export class ChatWidget {
         this.launcherBtn = this.shadowRoot.querySelector('.launcher-button') as HTMLButtonElement;
         this.audioToggleBtn = this.shadowRoot.querySelector('.audio-toggle-btn') as HTMLButtonElement;
 
-        // Load persisted state
-        const savedAudioState = localStorage.getItem('ec_voice_audio_enabled');
-        if (savedAudioState === 'true') {
-            this.isAudioEnabled = true;
-            this.updateAudioToggleUI();
-        }
-
         // Audio Element (invisible)
         this.audioElement = document.createElement('audio');
         this.shadowRoot.appendChild(this.audioElement);
@@ -127,7 +120,7 @@ export class ChatWidget {
 
         this.audioToggleBtn.addEventListener('click', () => {
             this.isAudioEnabled = !this.isAudioEnabled;
-            localStorage.setItem('ec_voice_audio_enabled', String(this.isAudioEnabled));
+            // localStorage.setItem('ec_voice_audio_enabled', String(this.isAudioEnabled)); // Do not persist
             this.updateAudioToggleUI();
 
             // Note: If turning ON, we might want to check/resume context, but usually it's fine until next play.
