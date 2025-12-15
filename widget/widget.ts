@@ -6,6 +6,7 @@ export class ChatWidget {
     private audioContext: AudioContext | null = null;
     private nextStartTime: number = 0;
     private audioQueue: ArrayBuffer[] = [];
+    private isDecoding = false;
 
     // UI Elements
     private chatWindow: HTMLElement;
@@ -172,18 +173,20 @@ export class ChatWidget {
     }
 
     private processAudioQueue() {
-        if (!this.audioContext) return;
+        if (!this.audioContext || this.isDecoding || this.audioQueue.length === 0) return;
 
-        while (this.audioQueue.length > 0) {
-            const chunk = this.audioQueue.shift();
-            if (chunk) {
-                this.decodeAndPlay(chunk);
-            }
+        const chunk = this.audioQueue.shift();
+        if (chunk) {
+            this.isDecoding = true;
+            this.decodeAndPlay(chunk);
         }
     }
 
     private decodeAndPlay(data: ArrayBuffer) {
-        if (!this.audioContext) return;
+        if (!this.audioContext) {
+            this.isDecoding = false;
+            return;
+        }
 
         // Clone buffer because decodeAudioData detaches it
         const bufferCopy = data.slice(0);
@@ -194,12 +197,24 @@ export class ChatWidget {
             source.connect(this.audioContext!.destination);
 
             const now = this.audioContext!.currentTime;
-            // Schedule next chunk
-            const startTime = Math.max(now, this.nextStartTime);
-            source.start(startTime);
-            this.nextStartTime = startTime + decodedBuffer.duration;
+
+            // Jitter Buffer Logic:
+            // If nextStartTime is in the past (underrun), schedule slightly in the future (200ms)
+            // to allow smooth playback of subsequent chunks and prevent cutting off start.
+            // Otherwise, schedule immediately after the previous chunk.
+            if (this.nextStartTime < now) {
+                this.nextStartTime = now + 0.2;
+            }
+
+            source.start(this.nextStartTime);
+            this.nextStartTime += decodedBuffer.duration;
+
+            this.isDecoding = false;
+            this.processAudioQueue(); // Process next chunk
         }, (e) => {
             console.error("Audio Decode Error", e);
+            this.isDecoding = false;
+            this.processAudioQueue(); // Continue even if error
         });
     }
     private initSpeechRecognition() {
