@@ -7,6 +7,7 @@ export class ChatWidget {
     private nextStartTime: number = 0;
     private audioQueue: ArrayBuffer[] = [];
     private isDecoding = false;
+    private isPlaying = false;
 
     // UI Elements
     private chatWindow: HTMLElement;
@@ -62,7 +63,11 @@ export class ChatWidget {
         });
 
         this.socket.on('response-complete', () => {
-            // End of turn
+            // Force play remaining chunks if initial buffer wasn't reached
+            if (!this.isPlaying && this.audioQueue.length > 0) {
+                this.isPlaying = true;
+                this.processAudioQueue();
+            }
         });
 
         this.socket.on('error', (data: { message: string }) => {
@@ -86,6 +91,11 @@ export class ChatWidget {
 
         // Show typing indicator
         this.showTypingIndicator();
+
+        // Reset audio state for new turn
+        this.isPlaying = false;
+        this.audioQueue = []; // Clear any old chunks
+        this.nextStartTime = 0;
 
         // Send message with audio preference
         this.socket.emit('user-input', { text, isVoiceInput: isVoice || this.isAudioEnabled });
@@ -162,14 +172,20 @@ export class ChatWidget {
         this.audioQueue.push(content as ArrayBuffer);
 
         if (!this.audioContext || this.audioContext.state !== 'running') {
-            // If context is not ready, we just queue.
-            // Try to init if not exists (though typically requires user gesture)
-            // If we are already in a flow where the user clicked, we might be able to resume.
-            // But usually initAudioContext is called on button clicks.
             return;
         }
 
-        this.processAudioQueue();
+        // Initial Buffering Strategy:
+        // Wait for 5 chunks to accumulate before starting playback to prevent stuttering.
+        // Once playing, process immediately.
+        if (!this.isPlaying) {
+            if (this.audioQueue.length >= 5) {
+                this.isPlaying = true;
+                this.processAudioQueue();
+            }
+        } else {
+            this.processAudioQueue();
+        }
     }
 
     private processAudioQueue() {
@@ -199,11 +215,10 @@ export class ChatWidget {
             const now = this.audioContext!.currentTime;
 
             // Jitter Buffer Logic:
-            // If nextStartTime is in the past (underrun), schedule slightly in the future (200ms)
-            // to allow smooth playback of subsequent chunks and prevent cutting off start.
-            // Otherwise, schedule immediately after the previous chunk.
+            // If nextStartTime is in the past (underrun), play immediately (catch up).
+            // Do NOT add artificial delay (+0.2) as it causes gaps.
             if (this.nextStartTime < now) {
-                this.nextStartTime = now + 0.2;
+                this.nextStartTime = now;
             }
 
             source.start(this.nextStartTime);
