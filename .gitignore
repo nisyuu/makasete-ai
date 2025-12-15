@@ -17,6 +17,8 @@ node_modules
 dist
 build
 out
+.next
+
 
 # Editors and OS
 .DS_Store
