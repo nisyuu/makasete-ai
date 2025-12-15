@@ -3,7 +3,8 @@ import { io, Socket } from 'socket.io-client';
 export class ChatWidget {
     private shadowRoot: ShadowRoot;
     private socket: Socket;
-    private mediaSource: MediaSource | null = null;
+    // @ts-ignore
+    private mediaSource: MediaSource | any;
     private sourceBuffer: SourceBuffer | null = null;
     private audioQueue: ArrayBuffer[] = [];
     private isSourceOpen = false;
@@ -38,8 +39,9 @@ export class ChatWidget {
         this.audioToggleBtn = this.shadowRoot.querySelector('.audio-toggle-btn') as HTMLButtonElement;
 
         // Audio setup
-        if ('MediaSource' in window) {
-            this.mediaSource = new MediaSource();
+        const MediaSourceClass = window.MediaSource || (window as any).ManagedMediaSource;
+        if (MediaSourceClass) {
+            this.mediaSource = new MediaSourceClass();
         } else {
             console.warn("MediaSource API not supported");
         }
@@ -47,9 +49,13 @@ export class ChatWidget {
         // Detect iOS
         const ua = navigator.userAgent;
         this.isIOS = /iPhone|iPad|iPod/i.test(ua);
+        console.log(`[Init] UA: ${ua}`);
         console.log('isIOS:', this.isIOS);
 
         this.audio = new Audio();
+        // ManagedMediaSource requires disableRemotePlayback for accurate local control
+        // @ts-ignore
+        this.audio.disableRemotePlayback = true;
         // this.audio.src = URL.createObjectURL(this.mediaSource); // Postpone to interaction?
         // Actually, we can just init it but browser might block autoplay unless interactions.
         // Let's bind it.
@@ -176,12 +182,20 @@ export class ChatWidget {
         this.audio.src = URL.createObjectURL(this.mediaSource);
 
         const ms = this.mediaSource;
+        const MediaSourceClass = window.MediaSource || (window as any).ManagedMediaSource;
+
         ms.addEventListener('sourceopen', () => {
             this.isSourceOpen = true;
             // Use mp4a.40.2 (AAC LC) which is standard. warning: iOS strict about MIME.
+            // Also check ManagedMediaSource support methods if available
             const mimeType = this.isIOS ? 'audio/mp4; codecs="mp4a.40.2"' : 'audio/mpeg';
+
+            const isSupported = MediaSourceClass && MediaSourceClass.isTypeSupported
+                ? MediaSourceClass.isTypeSupported(mimeType)
+                : 'unknown';
+
             console.log(`[AudioInit] isIOS: ${this.isIOS}, MIME: ${mimeType}`);
-            console.log(`[AudioInit] Supported: ${MediaSource.isTypeSupported(mimeType)}`);
+            console.log(`[AudioInit] Supported: ${isSupported}`);
 
             try {
                 this.sourceBuffer = ms.addSourceBuffer(mimeType);
