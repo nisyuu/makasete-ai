@@ -1,4 +1,5 @@
 import { ElevenLabsClient } from "elevenlabs";
+import { Readable } from 'stream';
 import { config } from '../config';
 
 export async function generateSpeechStream(text: string): Promise<NodeJS.ReadableStream> {
@@ -20,7 +21,11 @@ export async function generateSpeechStream(text: string): Promise<NodeJS.Readabl
             }
         });
 
-        return audioStream as any as NodeJS.ReadableStream;
+        // Check if stream needs conversion (e.g. if it is a Web Stream or just Async Iterable)
+        // The SDK might return a Node stream or a standard Web Stream depending on valid types.
+        // We use Readable.from() to ensure it is a Node.js Readable stream.
+        const nodeStream = Readable.from(audioStream as any);
+        return nodeStream;
     } catch (error) {
         console.error('ElevenLabs API Error:', error);
         throw error;
