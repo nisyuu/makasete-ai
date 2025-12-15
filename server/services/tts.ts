@@ -8,7 +8,7 @@ export async function generateSpeechStream(text: string): Promise<NodeJS.Readabl
     }
 
     const client = new ElevenLabsClient({ apiKey: config.elevenLabsApiKey });
-    const voiceId = config.voiceId || '21m00Tcm4TlvDq8ikWAM';
+    const voiceId = config.voiceId || 'AYFJOmHxRJdmf572TQ7R';
     const modelId = config.modelId || 'eleven_flash_v2_5';
 
     try {
