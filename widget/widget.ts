@@ -49,8 +49,6 @@ export class ChatWidget {
         // Detect iOS
         const ua = navigator.userAgent;
         this.isIOS = /iPhone|iPad|iPod/i.test(ua);
-        console.log(`[Init] UA: ${ua}`);
-        console.log('isIOS:', this.isIOS);
 
         this.audio = new Audio();
         // ManagedMediaSource requires disableRemotePlayback for accurate local control
@@ -190,13 +188,6 @@ export class ChatWidget {
             // Also check ManagedMediaSource support methods if available
             const mimeType = this.isIOS ? 'audio/mp4; codecs="mp4a.40.2"' : 'audio/mpeg';
 
-            const isSupported = MediaSourceClass && MediaSourceClass.isTypeSupported
-                ? MediaSourceClass.isTypeSupported(mimeType)
-                : 'unknown';
-
-            console.log(`[AudioInit] isIOS: ${this.isIOS}, MIME: ${mimeType}`);
-            console.log(`[AudioInit] Supported: ${isSupported}`);
-
             try {
                 const sb = ms.addSourceBuffer(mimeType);
                 // Set mode to 'sequence' to handle segments with non-continuous timestamps (resets to 0)
@@ -205,7 +196,7 @@ export class ChatWidget {
                 this.sourceBuffer = sb;
 
                 sb.addEventListener('updateend', () => {
-                    // console.log(`[SourceBuffer] UpdateEnd. Buffered: ${this.getBufferedRanges()}`);
+
                     this.processAudioQueue();
                 });
 
@@ -248,15 +239,7 @@ export class ChatWidget {
         }
     }
 
-    private getBufferedRanges(): string {
-        if (!this.sourceBuffer) return 'No SourceBuffer';
-        const ranges = this.sourceBuffer.buffered;
-        const result: string[] = [];
-        for (let i = 0; i < ranges.length; i++) {
-            result.push(`[${ranges.start(i).toFixed(2)}, ${ranges.end(i).toFixed(2)}]`);
-        }
-        return result.join(', ');
-    }
+
     private initSpeechRecognition() {
         // @ts-ignore
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;

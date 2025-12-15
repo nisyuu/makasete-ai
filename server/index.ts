@@ -54,7 +54,7 @@ io.on('connection', (socket) => {
 
     socket.on('user-input', async (data: { text: string; isVoiceInput: boolean; isIOS?: boolean }) => {
         const { text, isVoiceInput, isIOS } = data;
-        console.log(`Received input: ${text}, isVoice: ${isVoiceInput}, isIOS: ${isIOS}`);
+        console.log(`Received input: ${text}, isVoice: ${isVoiceInput}`);
 
         // Add user message to history
         chatHistory.push({ role: "user", parts: [{ text }] });
@@ -117,7 +117,6 @@ async function processSentence(socket: Socket, sentence: string, isVoiceInput: b
 
             // Transcode if iOS
             if (isIOS) {
-                console.log(`Transcoding to fMP4 for iOS: "${cleanSentence.substring(0, 20)}..."`);
                 audioStream = transcodeToFmp4(audioStream as any) as any;
             }
 
