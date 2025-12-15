@@ -274,3 +274,12 @@
     transform: scale(1);
   }
 }
+
+@media (max-width: 600px) {
+
+  .send-btn,
+  .mic-btn {
+    padding: 12px;
+    font-size: 20px;
+  }
+}
