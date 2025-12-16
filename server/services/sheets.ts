@@ -12,6 +12,7 @@ export interface Product {
     image_url: string;
     description: string;
     amazon_link: string;
+    amazon_kindle_link: string;
     published_at: string;
 }
 
@@ -60,7 +61,7 @@ export async function fetchProducts(): Promise<Product[]> {
 
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: config.googleSheetsId,
-            range: 'books!A2:I', // Exclude header row (A1)
+            range: 'books!A2:J', // Exclude header row (A1)
         });
 
         const rows = response.data.values;
@@ -79,7 +80,8 @@ export async function fetchProducts(): Promise<Product[]> {
             image_url: row[5] || '',
             description: row[6] || '',
             amazon_link: row[7] || '',
-            published_at: row[8] || '',
+            amazon_kindle_link: row[8] || '',
+            published_at: row[9] || '',
         }));
 
         console.log(`Loaded ${productCache.length} products to cache.`);
