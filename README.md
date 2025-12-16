@@ -1,4 +1,4 @@
-# EC Voice Assistant Widget
+# Makasete AI
 
 Google GeminiとElevenLabsを活用した、ECサイト向け音声対話チャットボットウィジェット。
 
