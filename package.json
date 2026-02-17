@@ -5,10 +5,10 @@
   "scripts": {
     "start": "ts-node server/index.ts",
     "dev:server": "nodemon --watch 'server/**/*.ts' --exec 'ts-node' server/index.ts",
-    "dev": "concurrently \"yarn dev:server\" \"yarn watch:widget\"",
+    "dev": "concurrently \"pnpm dev:server\" \"pnpm watch:widget\"",
     "build:widget": "vite build --config widget/vite.config.ts",
     "watch:widget": "vite build --config widget/vite.config.ts --watch",
-    "build": "yarn build:widget && tsc -p server",
+    "build": "pnpm build:widget && tsc -p server",
     "start:prod": "node dist/server/index.js",
     "lint": "eslint ."
   },
@@ -40,6 +40,5 @@
     "typescript": "^5.3.2",
     "typescript-eslint": "^8.49.0",
     "vite": "^5.0.0"
-  },
-  "packageManager": "yarn@4.12.0"
+  }
 }
