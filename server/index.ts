@@ -87,7 +87,7 @@ io.on('connection', (socket) => {
     const chatHistory: any[] = [];
 
     socket.on('user-input', async (data: { text: string; isVoiceInput: boolean; isIOS?: boolean }) => {
-        const { text, isVoiceInput, isIOS } = data;
+        const { text, isVoiceInput } = data;
         
         // Security: Limit input length to prevent DoS/Resource exhaustion
         if (!text || typeof text !== 'string' || text.length > 1000) {
@@ -121,6 +121,7 @@ io.on('connection', (socket) => {
                     let audioStream: NodeJS.ReadableStream = await generateSpeechStream(cleanAnswer);
 
                     // Always transcode to fMP4 for consistent MSE compatibility across browsers
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     audioStream = transcodeToFmp4(audioStream as any);
 
                     audioStream.on('data', (chunk: Buffer) => {
@@ -148,11 +149,10 @@ io.on('connection', (socket) => {
             // Signal end of turn with extra data if any
             socket.emit('response-complete', { recommended_ids });
 
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } catch (error: any) {
-            console.error("Error processing input:", error);
-            const errorMessage = error?.message || "Unknown error";
-            socket.emit('error', { message: `Processing error: ${errorMessage}` });
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            console.error("Error processing input:", message);
+            socket.emit('error', { message: `Processing error: ${message}` });
         }
     });
 
