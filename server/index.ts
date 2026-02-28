@@ -7,7 +7,7 @@ import { rateLimit } from 'express-rate-limit';
 import { config } from './config';
 import { fetchProducts, getProducts, fetchNews, getNews, fetchSystemPrompt } from './services/sheets';
 import { generateResponseStream } from './services/gemini';
-import { generateSpeechStream } from './services/tts';
+import { getTTSService } from './services/tts/factory'; // Use factory
 import { transcodeToFmp4 } from './services/transcode';
 import { StreamBuffer } from './utils/streamBuffer';
 
@@ -159,8 +159,9 @@ async function processSentence(socket: Socket, sentence: string, isVoiceInput: b
 
         try {
             const cleanSentence = removeMarkdownLinks(sentence);
-            console.log(`[TTS] Requesting audio for: "${cleanSentence.substring(0, 20)}..."`);
-            let audioStream: NodeJS.ReadableStream = await generateSpeechStream(cleanSentence);
+            const ttsService = getTTSService();
+            console.log(`[${ttsService.getName()}] Requesting audio for: "${cleanSentence.substring(0, 20)}..."`);
+            let audioStream: NodeJS.ReadableStream = await ttsService.generateSpeechStream(cleanSentence);
 
             // Always transcode to fMP4 for MSE compatibility
             // eslint-disable-next-line @typescript-eslint/no-explicit-any

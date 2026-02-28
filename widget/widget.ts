@@ -6,7 +6,7 @@ export class ChatWidget {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     private mediaSource: MediaSource | any;
     private sourceBuffer: SourceBuffer | null = null;
-    private audioQueue: ArrayBuffer[] = [];
+    private audioQueue: ArrayBufferLike[] = [];
     private isSourceOpen = false;
     private audio: HTMLAudioElement;
     private isIOS = false; // Add flag for iOS detection
@@ -154,17 +154,19 @@ export class ChatWidget {
         });
     }
 
-    private handleAudioChunk(content: any) {
+    private handleAudioChunk(content: unknown) {
         // Convert various binary formats to ArrayBuffer
-        let buffer: ArrayBuffer;
+        let buffer: ArrayBufferLike;
         
         if (content instanceof ArrayBuffer) {
             buffer = content;
         } else if (content instanceof Uint8Array || ArrayBuffer.isView(content)) {
             buffer = content.buffer;
-        } else if (typeof content === 'object' && content !== null && content.type === 'Buffer') {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } else if (typeof content === 'object' && content !== null && (content as any).type === 'Buffer') {
             // Handle Socket.io Buffer serialization
-            buffer = new Uint8Array(content.data).buffer;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            buffer = new Uint8Array((content as any).data).buffer;
         } else {
             console.warn('[MakaseteBot] Unknown audio data format:', typeof content);
             return;
@@ -179,7 +181,7 @@ export class ChatWidget {
             const chunk = this.audioQueue.shift();
             if (chunk) {
                 try {
-                    this.sourceBuffer.appendBuffer(chunk);
+                    this.sourceBuffer.appendBuffer(chunk as ArrayBuffer);
                 } catch (e) {
                     console.error('[MakaseteBot] Append buffer error:', e);
                 }
