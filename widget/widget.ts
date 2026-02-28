@@ -48,20 +48,21 @@ export class ChatWidget {
             console.warn("MediaSource API not supported");
         }
 
-        // Detect iOS
+        // Detect iOS and Safari (both need fMP4 for MSE)
         const ua = navigator.userAgent;
-        this.isIOS = /iPhone|iPad|iPod/i.test(ua);
+        this.isIOS = /iPhone|iPad|iPod/i.test(ua) || 
+                     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) ||
+                     (/^((?!chrome|android).)*safari/i.test(ua));
 
         this.audio = new Audio();
         // ManagedMediaSource requires disableRemotePlayback for accurate local control
         this.audio.disableRemotePlayback = true;
-        // this.audio.src = URL.createObjectURL(this.mediaSource); // Postpone to interaction?
-        // Actually, we can just init it but browser might block autoplay unless interactions.
-        // Let's bind it.
-
+        
+        // Initial state update
         this.initSocket();
         this.bindEvents();
         this.initSpeechRecognition();
+        this.updateAudioToggleUI(); // Ensure initial state matches
 
         // Initial Greeting
         this.appendMessage('bot', 'いらっしゃいませ。AI書店員の福蔵です。何かお探しの本はございますか？');
@@ -152,12 +153,12 @@ export class ChatWidget {
 
         this.audioToggleBtn.addEventListener('click', () => {
             this.isAudioEnabled = !this.isAudioEnabled;
-            // localStorage.setItem('ec_voice_audio_enabled', String(this.isAudioEnabled)); // Do not persist
             this.updateAudioToggleUI();
 
-            // Note: If turning ON, we might want to check/resume context, but usually it's fine until next play.
             if (this.isAudioEnabled) {
                 this.initAudio();
+                // Prime the audio element to allow playback on subsequent streams
+                this.audio.play().catch(e => console.log('Autoplay priming:', e));
             }
         });
     }
@@ -169,11 +170,11 @@ export class ChatWidget {
         if (this.isAudioEnabled) {
             if (iconSpan) iconSpan.textContent = '🔊';
             if (textSpan) textSpan.textContent = '音声: ON';
-            this.audioToggleBtn.title = '音声読み上げON';
+            this.audioToggleBtn.title = '音声読み上げをOFFにする';
         } else {
             if (iconSpan) iconSpan.textContent = '🔇';
             if (textSpan) textSpan.textContent = '音声: OFF';
-            this.audioToggleBtn.title = '音声読み上げOFF';
+            this.audioToggleBtn.title = '音声読み上げをONにする';
         }
     }
 
@@ -186,9 +187,8 @@ export class ChatWidget {
 
         ms.addEventListener('sourceopen', () => {
             this.isSourceOpen = true;
-            // Use mp4a.40.2 (AAC LC) which is standard. warning: iOS strict about MIME.
-            // Also check ManagedMediaSource support methods if available
-            const mimeType = this.isIOS ? 'audio/mp4; codecs="mp4a.40.2"' : 'audio/mpeg';
+            // Use mp4a.40.2 (AAC LC). Standard for fMP4 streaming via MSE.
+            const mimeType = 'audio/mp4; codecs="mp4a.40.2"';
 
             try {
                 const sb = ms.addSourceBuffer(mimeType);

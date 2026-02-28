@@ -55,11 +55,21 @@ import { ChatWidget } from './widget';
             const url = new URL(scriptTag.src);
             serverUrl = url.origin;
         } else {
-            // Fallback for local development
-            serverUrl = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-                ? 'http://localhost:8080'
-                : '';
+            // Fallback: search for the script tag by its filename
+            const scripts = document.getElementsByTagName('script');
+            for (let i = 0; i < scripts.length; i++) {
+                const src = scripts[i].src;
+                if (src && src.includes('widget.js')) {
+                    serverUrl = new URL(src).origin;
+                    break;
+                }
+            }
         }
+    }
+
+    // Last resort fallback for local development
+    if (!serverUrl && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+        serverUrl = 'http://localhost:8080';
     }
 
     if (!serverUrl) {

@@ -120,10 +120,8 @@ io.on('connection', (socket) => {
                     const cleanAnswer = removeMarkdownLinks(answer);
                     let audioStream: NodeJS.ReadableStream = await generateSpeechStream(cleanAnswer);
 
-                    if (isIOS) {
-                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                        audioStream = transcodeToFmp4(audioStream as any) as any;
-                    }
+                    // Always transcode to fMP4 for consistent MSE compatibility across browsers
+                    audioStream = transcodeToFmp4(audioStream as any);
 
                     audioStream.on('data', (chunk: Buffer) => {
                         socket.emit('audio-chunk', { type: 'audio', content: chunk });
