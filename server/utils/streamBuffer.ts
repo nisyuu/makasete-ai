@@ -6,23 +6,28 @@ export class StreamBuffer {
         this.buffer += text;
         const sentences: string[] = [];
 
-        let lastIndex = 0;
-        for (let i = 0; i < this.buffer.length; i++) {
-            const char = this.buffer[i];
-            if (this.punctuations.includes(char)) {
-                const sentence = this.buffer.substring(lastIndex, i + 1).trim();
+        while (true) {
+            let earliestIndex = -1;
+            let foundPunctuation = "";
+
+            for (const p of this.punctuations) {
+                const index = this.buffer.indexOf(p);
+                if (index !== -1 && (earliestIndex === -1 || index < earliestIndex)) {
+                    earliestIndex = index;
+                    foundPunctuation = p;
+                }
+            }
+
+            if (earliestIndex !== -1) {
+                const sentence = this.buffer.slice(0, earliestIndex + foundPunctuation.length).trim();
                 if (sentence) {
                     sentences.push(sentence);
                 }
-                lastIndex = i + 1;
+                this.buffer = this.buffer.slice(earliestIndex + foundPunctuation.length);
+            } else {
+                break;
             }
         }
-
-        // Remove processed part from buffer
-        this.buffer = this.buffer.substring(lastIndex);
-
-        // Also check if we have a very long buffer without punctuation to avoid memory issues or hanging
-        // For now simple implementation as per spec
 
         return sentences;
     }

@@ -28,6 +28,7 @@ export class ChatWidget {
 
     constructor(shadowRoot: ShadowRoot, serverUrl: string) {
         this.shadowRoot = shadowRoot;
+        console.log('[MakaseteBot] Connecting to:', serverUrl);
         this.socket = io(serverUrl);
 
         // Element binding
@@ -39,37 +40,29 @@ export class ChatWidget {
         this.launcherBtn = this.shadowRoot.querySelector('.launcher-button') as HTMLButtonElement;
         this.audioToggleBtn = this.shadowRoot.querySelector('.audio-toggle-btn') as HTMLButtonElement;
 
-        // Audio setup
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const MediaSourceClass = window.MediaSource || (window as any).ManagedMediaSource;
-        if (MediaSourceClass) {
-            this.mediaSource = new MediaSourceClass();
-        } else {
-            console.warn("MediaSource API not supported");
-        }
-
         // Detect iOS and Safari (both need fMP4 for MSE)
         const ua = navigator.userAgent;
         this.isIOS = /iPhone|iPad|iPod/i.test(ua) || 
                      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) ||
                      (/^((?!chrome|android).)*safari/i.test(ua));
+        
+        console.log('[MakaseteBot] Device info:', { isIOS: this.isIOS, ua });
 
         this.audio = new Audio();
-        // ManagedMediaSource requires disableRemotePlayback for accurate local control
         this.audio.disableRemotePlayback = true;
         
-        // Initial state update
         this.initSocket();
         this.bindEvents();
         this.initSpeechRecognition();
-        this.updateAudioToggleUI(); // Ensure initial state matches
-
+        this.updateAudioToggleUI();
+        
         // Initial Greeting
         this.appendMessage('bot', 'いらっしゃいませ。AI書店員の福蔵です。何かお探しの本はございますか？');
     }
+
     private initSocket() {
         this.socket.on('connect', () => {
-            console.log('Connected to server');
+            console.log('[MakaseteBot] Connected to server. ID:', this.socket.id);
         });
 
         this.socket.on('text-chunk', (data: { content: string }) => {
@@ -85,45 +78,102 @@ export class ChatWidget {
             }
         });
 
-        this.socket.on('response-complete', () => {
-            // End of turn (for MSE, we might signal end of stream if needed, 
-            // but usually we just keep it open or let it finish playing buffer)
+        this.socket.on('response-complete', (data) => {
+            console.log('[MakaseteBot] Response complete:', data);
         });
 
         this.socket.on('error', (data: { message: string }) => {
-            console.error("Server Error:", data.message);
+            console.error("[MakaseteBot] Server Error:", data.message);
             this.appendMessage('bot', `エラーが発生しました: ${data.message}`);
         });
     }
-
-    // ...
-
-    // ...
-
-    // ...
 
     private sendMessage(isVoice = false) {
         const text = this.input.value.trim();
         if (!text) return;
 
+        const useAudio = isVoice || this.isAudioEnabled;
+        console.log('[MakaseteBot] Sending message. Audio Enabled:', useAudio);
+
         this.appendMessage('user', text);
         this.input.value = '';
-
-        // Show typing indicator
         this.showTypingIndicator();
 
-        // Reset audio state for new turn
-        // For simple MSE, we might just clear queue if something is pending,
-        // but typically we append to flow. 
-        // Clearing logic might be needed if user interrupts.
+        // If audio is enabled, reset and prime for the incoming stream
+        if (useAudio) {
+            this.resetAudio();
+            this.initAudio();
+            this.audio.play().catch(e => console.log('[MakaseteBot] Autoplay priming error:', e));
+        }
 
-        // Send message with audio preference
-        // Also send isIOS flag so server knows to transcode if needed
         this.socket.emit('user-input', {
             text,
-            isVoiceInput: isVoice || this.isAudioEnabled,
+            isVoiceInput: useAudio,
             isIOS: this.isIOS
         });
+    }
+
+    private resetAudio() {
+        console.log('[MakaseteBot] Resetting audio state');
+        this.audioQueue = [];
+        this.isSourceOpen = false;
+        this.sourceBuffer = null;
+        if (this.audio.src) {
+            URL.revokeObjectURL(this.audio.src);
+            this.audio.src = '';
+        }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const MediaSourceClass = window.MediaSource || (window as any).ManagedMediaSource;
+        if (MediaSourceClass) {
+            this.mediaSource = new MediaSourceClass();
+        }
+    }
+
+    private initAudio() {
+        if (!this.mediaSource || this.audio.src) return;
+
+        this.audio.src = URL.createObjectURL(this.mediaSource);
+        const ms = this.mediaSource;
+
+        ms.addEventListener('sourceopen', () => {
+            console.log('[MakaseteBot] MediaSource opened');
+            this.isSourceOpen = true;
+            const mimeType = 'audio/mp4; codecs="mp4a.40.2"';
+
+            try {
+                const sb = ms.addSourceBuffer(mimeType);
+                sb.mode = 'sequence';
+                this.sourceBuffer = sb;
+                sb.addEventListener('updateend', () => this.processAudioQueue());
+                sb.addEventListener('error', (e: Event) => console.error('[MakaseteBot] SourceBuffer error:', e));
+                this.processAudioQueue();
+            } catch (e) {
+                console.error('[MakaseteBot] AddSourceBuffer failed:', e);
+            }
+        });
+    }
+
+    private handleAudioChunk(content: ArrayBuffer | string) {
+        if (!(content instanceof ArrayBuffer)) {
+            // Socket.io should deliver ArrayBuffer, but just in case
+            return;
+        }
+        
+        this.audioQueue.push(content);
+        this.processAudioQueue();
+    }
+
+    private processAudioQueue() {
+        if (this.audioQueue.length > 0 && this.sourceBuffer && !this.sourceBuffer.updating && this.isSourceOpen) {
+            const chunk = this.audioQueue.shift();
+            if (chunk) {
+                try {
+                    this.sourceBuffer.appendBuffer(chunk);
+                } catch (e) {
+                    console.error('[MakaseteBot] Append buffer error:', e);
+                }
+            }
+        }
     }
 
     private bindEvents() {
@@ -131,8 +181,9 @@ export class ChatWidget {
             this.chatWindow.classList.toggle('open');
             if (this.chatWindow.classList.contains('open')) {
                 // Initialize audio on user interaction to unlock autoplay policies
+                this.resetAudio();
                 this.initAudio();
-                this.audio.play().catch(e => console.log('Autoplay blocked:', e));
+                this.audio.play().catch(e => console.log('[MakaseteBot] Autoplay priming error:', e));
             }
         });
 
@@ -140,25 +191,28 @@ export class ChatWidget {
 
         this.input.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault(); // Prevent newline insertion on send
+                e.preventDefault();
                 this.sendMessage();
             }
         });
 
         this.micBtn.addEventListener('click', () => this.toggleRecording());
 
-        this.shadowRoot.querySelector('.close-btn')?.addEventListener('click', () => {
-            this.chatWindow.classList.remove('open');
-        });
+        const closeBtn = this.shadowRoot.querySelector('.close-btn');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => {
+                this.chatWindow.classList.remove('open');
+            });
+        }
 
         this.audioToggleBtn.addEventListener('click', () => {
             this.isAudioEnabled = !this.isAudioEnabled;
             this.updateAudioToggleUI();
 
             if (this.isAudioEnabled) {
+                this.resetAudio();
                 this.initAudio();
-                // Prime the audio element to allow playback on subsequent streams
-                this.audio.play().catch(e => console.log('Autoplay priming:', e));
+                this.audio.play().catch(e => console.log('[MakaseteBot] Autoplay priming error:', e));
             }
         });
     }
@@ -177,70 +231,6 @@ export class ChatWidget {
             this.audioToggleBtn.title = '音声読み上げをONにする';
         }
     }
-
-    private initAudio() {
-        if (!this.mediaSource || this.audio.src) return; // Already init or no support
-
-        this.audio.src = URL.createObjectURL(this.mediaSource);
-
-        const ms = this.mediaSource;
-
-        ms.addEventListener('sourceopen', () => {
-            this.isSourceOpen = true;
-            // Use mp4a.40.2 (AAC LC). Standard for fMP4 streaming via MSE.
-            const mimeType = 'audio/mp4; codecs="mp4a.40.2"';
-
-            try {
-                const sb = ms.addSourceBuffer(mimeType);
-                // Set mode to 'sequence' to handle segments with non-continuous timestamps (resets to 0)
-                // This forces the browser to play chunks in the order they are appended.
-                sb.mode = 'sequence';
-                this.sourceBuffer = sb;
-
-                sb.addEventListener('updateend', () => {
-
-                    this.processAudioQueue();
-                });
-
-                sb.addEventListener('error', (e: Event) => {
-                    console.error('[SourceBuffer] Error:', e);
-                });
-
-                this.processAudioQueue();
-            } catch (e) {
-                console.error('[SourceBuffer] AddSourceBuffer Failed:', e);
-            }
-        });
-
-        // Try to play (mute if needed?)
-        this.audio.play().catch(e => console.log('Autoplay blocked:', e));
-    }
-
-    private handleAudioChunk(content: ArrayBuffer | string) {
-        this.audioQueue.push(content as ArrayBuffer);
-
-        if (!this.isSourceOpen || !this.sourceBuffer) {
-            // Wait for sourceopen
-            return;
-        }
-
-        this.processAudioQueue();
-    }
-
-    private processAudioQueue() {
-        if (this.audioQueue.length > 0 && this.sourceBuffer && !this.sourceBuffer.updating) {
-            const chunk = this.audioQueue.shift();
-            if (chunk) {
-                try {
-                    // console.log(`[SourceBuffer] Appending chunk: ${chunk.byteLength} bytes`);
-                    this.sourceBuffer.appendBuffer(chunk);
-                } catch (e) {
-                    console.error('[SourceBuffer] Append Error:', e);
-                }
-            }
-        }
-    }
-
 
     private initSpeechRecognition() {
         // @ts-expect-error: SpeechRecognition might not be in window
