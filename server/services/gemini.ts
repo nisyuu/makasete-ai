@@ -7,45 +7,44 @@ let genAI: GoogleGenerativeAI;
 let model: any;
 
 export function initGemini() {
-    if (!config.geminiApiKey) {
-        console.error("GEMINI_API_KEY is missing");
-        return;
-    }
-    genAI = new GoogleGenerativeAI(config.geminiApiKey);
+  if (!config.geminiApiKey) {
+    console.error("GEMINI_API_KEY is missing");
+    return;
+  }
+  genAI = new GoogleGenerativeAI(config.geminiApiKey);
 
-    // Define explicit JSON schema for the response
-    const schema: Schema = {
-        description: "接客応答の構造定義",
-        type: SchemaType.OBJECT,
-        properties: {
-            answer: {
-                type: SchemaType.STRING,
-                description: "音声合成用の自然な回答テキスト。URLや記号は含めない。",
-            },
-            display_text: {
-                type: SchemaType.STRING,
-                description: "画面表示用のMarkdown形式の回答テキスト。商品リンクを含める。",
-            },
-            recommended_ids: {
-                type: SchemaType.ARRAY,
-                items: { type: SchemaType.STRING },
-                description: "おすすめした商品のIDの配列（最大3つ）",
-            },
-        },
-        required: ["answer", "display_text", "recommended_ids"],
-    };
-
+  // Define explicit JSON schema for the response
+  const schema: Schema = {
+    description: "接客応答の構造定義",
+    type: SchemaType.OBJECT,
+    properties: {
+      answer: {
+        type: SchemaType.STRING,
+        description: "音声合成用の自然な回答テキスト。URLや記号は含めない。",
+      },
+      display_text: {
+        type: SchemaType.STRING,
+        description:
+          "画面表示用のMarkdown形式の回答テキスト。商品リンクを含める。",
+      },
+      recommended_ids: {
+        type: SchemaType.ARRAY,
+        items: { type: SchemaType.STRING },
+        description: "おすすめした商品のIDの配列（最大3つ）",
+      },
+    },
+    required: ["answer", "display_text", "recommended_ids"],
+  };
 
   // Using gemini-2.0-flash for JSON Schema support
   model = genAI.getGenerativeModel({
-    model: "gemini-2.0-flash",
+    model: "gemini-2.5-flash",
     generationConfig: {
       responseMimeType: "application/json",
       responseSchema: schema,
     },
   });
 }
-
 /**
  * Generates a structured JSON response from Gemini.
  */
