@@ -40,16 +40,33 @@ function mapRowsToObjects<T>(header: string[], rows: string[][]): T[] {
 }
 
 async function getSheetsClient(): Promise<sheets_v4.Sheets> {
-    const keyName = 'tasukari-4170ed37d5cd.json';
-    const absoluteKeyPath = path.join(process.cwd(), keyName);
+    const localKeyName = 'google-key.json';
+    const absoluteKeyPath = path.join(process.cwd(), localKeyName);
 
     const scopes = ['https://www.googleapis.com/auth/spreadsheets.readonly'];
-    const keyFile = fs.existsSync(absoluteKeyPath) ? absoluteKeyPath : undefined;
+    
+    let keyFile: string | undefined = undefined;
+    if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+        keyFile = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+    } else if (fs.existsSync(absoluteKeyPath)) {
+        // Basic check to see if the file is readable and not empty
+        try {
+            const stats = fs.statSync(absoluteKeyPath);
+            if (stats.size > 0) {
+                keyFile = absoluteKeyPath;
+                console.log(`Using local key file ${localKeyName} for Sheets Auth`);
+            } else {
+                console.warn(`Local key file ${localKeyName} is empty.`);
+            }
+        } catch (e) {
+            console.warn(`Could not read local key file ${localKeyName}:`, e);
+        }
+    }
 
-    if (keyFile) {
-        console.log("Using local key file for Sheets Auth");
-    } else {
-        console.log("Using ADC for Sheets Auth");
+    if (!keyFile && !process.env.K_SERVICE) { // Not on Cloud Run and no key file
+        console.warn("No valid authentication found (GOOGLE_APPLICATION_CREDENTIALS or google-key.json). Local Sheets API calls will likely fail.");
+    } else if (!keyFile) {
+        console.log("Using Default ADC for Sheets Auth (assuming Cloud Run environment)");
     }
 
     const auth = new google.auth.GoogleAuth({

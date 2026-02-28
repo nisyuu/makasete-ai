@@ -43,7 +43,7 @@ logs
 coverage
 .nyc_output
 
-tasukari-4170ed37d5cd.json
+google-key.json
 
 # Secrets
 terraform.tfvars
