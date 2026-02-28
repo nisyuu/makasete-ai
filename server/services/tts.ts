@@ -12,6 +12,7 @@ export async function generateSpeechStream(text: string): Promise<NodeJS.Readabl
     const modelId = config.modelId || 'eleven_flash_v2_5';
 
     try {
+        console.log(`[ElevenLabs] Converting text: "${text.substring(0, 20)}..."`);
         const audioStream = await client.textToSpeech.convert(voiceId, {
             text,
             modelId: modelId,
@@ -22,12 +23,9 @@ export async function generateSpeechStream(text: string): Promise<NodeJS.Readabl
             }
         });
 
-        // Check if stream needs conversion (e.g. if it is a Web Stream or just Async Iterable)
-        // The SDK might return a Node stream or a standard Web Stream depending on valid types.
-        // We use Readable.from() to ensure it is a Node.js Readable stream.
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const nodeStream = Readable.from(audioStream as any);
-        return nodeStream;
+        // The stream from SDK might be a Web Stream or AsyncIterable. 
+        // Readable.from handles AsyncIterables correctly in Node.js.
+        return Readable.from(audioStream as any);
     } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
         console.error('ElevenLabs API Error:', message);

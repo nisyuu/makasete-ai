@@ -156,21 +156,28 @@ async function processSentence(socket: Socket, sentence: string, isVoiceInput: b
 
         try {
             const cleanSentence = removeMarkdownLinks(sentence);
+            console.log(`[TTS] Requesting audio for: "${cleanSentence.substring(0, 20)}..."`);
             let audioStream: NodeJS.ReadableStream = await generateSpeechStream(cleanSentence);
 
             // Always transcode to fMP4 for MSE compatibility
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             audioStream = transcodeToFmp4(audioStream as any);
 
+            let totalBytes = 0;
             audioStream.on('data', (chunk: Buffer) => {
+                totalBytes += chunk.length;
                 socket.emit('audio-chunk', { type: 'audio', content: chunk });
             });
 
             await new Promise((resolve, reject) => {
                 audioStream.on('end', () => {
+                    console.log(`[TTS] Sent ${totalBytes} bytes of audio for sentence.`);
                     setTimeout(resolve, 300);
                 });
-                audioStream.on('error', reject);
+                audioStream.on('error', (err) => {
+                    console.error("[TTS] Stream error:", err);
+                    reject(err);
+                });
             });
 
         } catch (e: unknown) {
