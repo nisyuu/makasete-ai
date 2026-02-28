@@ -2,6 +2,9 @@
   "name": "makasete-bot",
   "version": "1.0.0",
   "description": "EC Site Embedded Voice AI Chatbot",
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "scripts": {
     "start": "ts-node server/index.ts",
     "dev:server": "nodemon --watch 'server/**/*.ts' --exec 'ts-node' server/index.ts",

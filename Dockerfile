@@ -1,4 +1,7 @@
-FROM node:20-slim
+FROM node:24-slim
+
+# Install ffmpeg and clean up
+RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
