@@ -13,6 +13,9 @@ import { StreamBuffer } from './utils/streamBuffer';
 
 const app = express();
 
+// Security: Trust proxy for Cloud Run to get correct client IP for rate limiting
+app.set('trust proxy', 1);
+
 // Security: Rate limiting
 const limiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
