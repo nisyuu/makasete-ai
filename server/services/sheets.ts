@@ -17,6 +17,7 @@ export interface News {
 
 let productCache: Product[] = [];
 let newsCache: News[] = [];
+let systemPromptCache: string = "";
 
 /**
  * Maps spreadsheet rows to objects using the first row as keys.
@@ -137,10 +138,42 @@ export async function fetchNews(): Promise<News[]> {
     }
 }
 
+export async function fetchSystemPrompt(): Promise<string> {
+    if (!config.googleSheetsId) {
+        console.warn("GOOGLE_SHEETS_ID is not set. Returning empty prompt.");
+        return "";
+    }
+
+    try {
+        const sheets = await getSheetsClient();
+        const response = await sheets.spreadsheets.values.get({
+            spreadsheetId: config.googleSheetsId,
+            range: 'prompt!A1:A1',
+        });
+
+        const values = response.data.values;
+        if (!values || values.length === 0 || !values[0][0]) {
+            console.log('No prompt found in prompt sheet.');
+            return "";
+        }
+
+        systemPromptCache = values[0][0];
+        console.log("Loaded system prompt from sheet.");
+        return systemPromptCache;
+    } catch (err) {
+        console.error("Error fetching system prompt:", err);
+        return "";
+    }
+}
+
 export function getProducts(): Product[] {
     return productCache;
 }
 
 export function getNews(): News[] {
     return newsCache;
+}
+
+export function getSystemPrompt(): string {
+    return systemPromptCache;
 }

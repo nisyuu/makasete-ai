@@ -1,14 +1,13 @@
 import express, { Request, Response } from 'express';
 import { createServer } from 'http';
-import { Server, Socket } from 'socket.io';
+import { Server } from 'socket.io';
 import cors from 'cors';
 import path from 'path';
 import { config } from './config';
-import { fetchProducts, getProducts, fetchNews, getNews } from './services/sheets';
-import { generateResponseStream } from './services/gemini';
+import { fetchProducts, getProducts, fetchNews, getNews, fetchSystemPrompt } from './services/sheets';
+import { generateResponse } from './services/gemini';
 import { generateSpeechStream } from './services/tts';
 import { transcodeToFmp4 } from './services/transcode';
-import { StreamBuffer } from './utils/streamBuffer';
 
 const app = express();
 const httpServer = createServer(app);
@@ -43,8 +42,8 @@ app.get('/api/news', (req: Request, res: Response) => {
 });
 
 // Initialize caching
-Promise.all([fetchProducts(), fetchNews()]).then(() => {
-    console.log("Initial data fetch (books & news) complete.");
+Promise.all([fetchProducts(), fetchNews(), fetchSystemPrompt()]).then(() => {
+    console.log("Initial data fetch (books, news & prompt) complete.");
 });
 
 // WebSocket logic
@@ -60,37 +59,47 @@ io.on('connection', (socket) => {
         // Add user message to history
         chatHistory.push({ role: "user", parts: [{ text }] });
 
-        const streamBuffer = new StreamBuffer();
-
         try {
-            // 1. Get Gemini Stream
-            const stream = await generateResponseStream(text, chatHistory);
+            // 1. Get Gemini Structured Response
+            const response = await generateResponse(text, chatHistory);
+            const { answer, display_text, recommended_ids } = response;
 
-            let fullResponseText = "";
+            // 2. Process for output
+            if (isVoiceInput) {
+                // In voice mode, send display text first
+                socket.emit('audio-chunk', { type: 'text', content: display_text });
 
-            for await (const chunk of stream) {
-                const chunkText = chunk.text();
-                fullResponseText += chunkText;
+                // Generate and stream audio for the 'answer' field
+                try {
+                    const cleanAnswer = removeMarkdownLinks(answer);
+                    let audioStream: NodeJS.ReadableStream = await generateSpeechStream(cleanAnswer);
 
-                // Buffer and split by sentences
-                const sentences = streamBuffer.add(chunkText);
+                    if (isIOS) {
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        audioStream = transcodeToFmp4(audioStream as any) as any;
+                    }
 
-                for (const sentence of sentences) {
-                    await processSentence(socket, sentence, isVoiceInput, isIOS);
+                    audioStream.on('data', (chunk: Buffer) => {
+                        socket.emit('audio-chunk', { type: 'audio', content: chunk });
+                    });
+
+                    await new Promise((resolve, reject) => {
+                        audioStream.on('end', resolve);
+                        audioStream.on('error', reject);
+                    });
+                } catch (e) {
+                    console.error("TTS Error:", e);
                 }
+            } else {
+                // Text mode: send display text
+                socket.emit('text-chunk', { content: display_text });
             }
 
-            // Flush remaining buffer
-            const remaining = streamBuffer.flush();
-            if (remaining) {
-                await processSentence(socket, remaining, isVoiceInput, isIOS);
-            }
+            // Add model response to history (as string for Gemini history)
+            chatHistory.push({ role: "model", parts: [{ text: JSON.stringify(response) }] });
 
-            // Add model response to history
-            chatHistory.push({ role: "model", parts: [{ text: fullResponseText }] });
-
-            // Signal end of turn
-            socket.emit('response-complete');
+            // Signal end of turn with extra data if any
+            socket.emit('response-complete', { recommended_ids });
 
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } catch (error: any) {
@@ -104,48 +113,6 @@ io.on('connection', (socket) => {
         console.log('Client disconnected:', socket.id);
     });
 });
-
-async function processSentence(socket: Socket, sentence: string, isVoiceInput: boolean, isIOS = false) {
-    // Determine if we should send audio or just text
-    if (isVoiceInput) {
-        // Send text first (for UI display)
-        socket.emit('audio-chunk', { type: 'text', content: sentence });
-
-        try {
-            // Generate Audio
-            // Remove markdown links for TTS (e.g. "[Book Title](/books/1)" -> "Book Title")
-            const cleanSentence = removeMarkdownLinks(sentence);
-            let audioStream: NodeJS.ReadableStream = await generateSpeechStream(cleanSentence);
-
-            // Transcode if iOS
-            if (isIOS) {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                audioStream = transcodeToFmp4(audioStream as any) as any;
-            }
-
-            // Stream audio chunks
-            audioStream.on('data', (chunk: Buffer) => {
-                socket.emit('audio-chunk', { type: 'audio', content: chunk });
-            });
-
-            // We need to wait for the stream to finish before returning to ensure order?
-            // For simple implementation, we might risk overlapping if next sentence comes too fast.
-            // But ElevenLabs is fast. Real production might need a queue.
-            // For this MVP, let's wrap in a promise.
-            await new Promise((resolve, reject) => {
-                audioStream.on('end', resolve);
-                audioStream.on('error', reject);
-            });
-
-        } catch (e) {
-            console.error("TTS Error:", e);
-            // Fallback to text only if TTS fails?
-        }
-    } else {
-        // Text mode: just send text
-        socket.emit('text-chunk', { content: sentence });
-    }
-}
 
 // Start Server
 const PORT = config.port;
