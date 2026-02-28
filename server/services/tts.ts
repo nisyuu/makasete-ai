@@ -28,8 +28,9 @@ export async function generateSpeechStream(text: string): Promise<NodeJS.Readabl
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const nodeStream = Readable.from(audioStream as any);
         return nodeStream;
-    } catch (error) {
-        console.error('ElevenLabs API Error:', error);
+    } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error('ElevenLabs API Error:', message);
         throw error;
     }
 }

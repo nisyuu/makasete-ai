@@ -3,6 +3,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import path from 'path';
+import { rateLimit } from 'express-rate-limit'; // Add this
 import { config } from './config';
 import { fetchProducts, getProducts, fetchNews, getNews, fetchSystemPrompt } from './services/sheets';
 import { generateResponse } from './services/gemini';
@@ -10,16 +11,49 @@ import { generateSpeechStream } from './services/tts';
 import { transcodeToFmp4 } from './services/transcode';
 
 const app = express();
+
+// Security: Rate limiting
+const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    limit: 100, // Limit each IP to 100 requests per `window`
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    message: "Too many requests from this IP, please try again later."
+});
+
+app.use(limiter);
+
 const httpServer = createServer(app);
+
+// Security: Use environment variable for allowed origins, fallback to * for dev if needed
+const allowedOrigins = process.env.ALLOWED_ORIGINS 
+    ? process.env.ALLOWED_ORIGINS.split(',') 
+    : "*";
+
 const io = new Server(httpServer, {
     cors: {
-        origin: "*", // Allow all origins for the widget
+        origin: allowedOrigins,
         methods: ["GET", "POST"]
     }
 });
 
+// Security: Simple Socket.io rate limiting (connections per IP)
+const socketConnections = new Map<string, number>();
+
+io.use((socket, next) => {
+    const ip = socket.handshake.address;
+    const count = socketConnections.get(ip) || 0;
+    if (count >= 5) { // Max 5 concurrent connections per IP
+        return next(new Error("Too many connections"));
+    }
+    socketConnections.set(ip, count + 1);
+    next();
+});
+
 // Middleware
-app.use(cors());
+app.use(cors({
+    origin: allowedOrigins
+}));
 app.use(express.json());
 
 // Static files (Widget)
@@ -54,10 +88,22 @@ io.on('connection', (socket) => {
 
     socket.on('user-input', async (data: { text: string; isVoiceInput: boolean; isIOS?: boolean }) => {
         const { text, isVoiceInput, isIOS } = data;
-        console.log(`Received input: ${text}, isVoice: ${isVoiceInput}`);
+        
+        // Security: Limit input length to prevent DoS/Resource exhaustion
+        if (!text || typeof text !== 'string' || text.length > 1000) {
+            socket.emit('error', { message: "Input too long or invalid" });
+            return;
+        }
+
+        console.log(`Received input: ${text.substring(0, 50)}..., isVoice: ${isVoiceInput}`);
 
         // Add user message to history
         chatHistory.push({ role: "user", parts: [{ text }] });
+
+        // Security: Truncate chat history to prevent context window blowup and cost spikes
+        if (chatHistory.length > 20) { // Keep only last 10 turns (20 roles)
+            chatHistory.splice(0, 2);
+        }
 
         try {
             // 1. Get Gemini Structured Response
@@ -113,6 +159,13 @@ io.on('connection', (socket) => {
     });
 
     socket.on('disconnect', () => {
+        const ip = socket.handshake.address;
+        const count = socketConnections.get(ip) || 1;
+        if (count <= 1) {
+            socketConnections.delete(ip);
+        } else {
+            socketConnections.set(ip, count - 1);
+        }
         console.log('Client disconnected:', socket.id);
     });
 });

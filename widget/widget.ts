@@ -298,7 +298,10 @@ export class ChatWidget {
                 .replace(/>/g, "&gt;");
 
             return safeText.replace(/\[((?:[^[\]]|\[[^\]]*\])+)\]\(([^)]+)\)/g, (_match, linkText, url) => {
-                return `<a href="${url}" target="_blank" rel="noopener noreferrer">${linkText}</a>`;
+                // Security: Basic URL sanitization to prevent javascript: pseudo-protocol XSS
+                const isSafeUrl = /^(https?:\/\/|\/)/i.test(url.trim());
+                const finalUrl = isSafeUrl ? url.trim() : '#';
+                return `<a href="${finalUrl}" target="_blank" rel="noopener noreferrer">${linkText}</a>`;
             });
         };
 

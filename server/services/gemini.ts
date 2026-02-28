@@ -100,8 +100,9 @@ ${productContext}
     const result = await chat.sendMessage(prompt);
     const responseText = result.response.text();
     return JSON.parse(responseText);
-  } catch (e) {
-    console.error("Gemini Error:", e);
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.error("Gemini Error:", message);
     throw e;
   }
 }

@@ -102,8 +102,9 @@ export async function fetchProducts(): Promise<Product[]> {
 
         console.log(`Loaded ${productCache.length} products to cache with columns: ${header.join(', ')}`);
         return productCache;
-    } catch (err) {
-        console.error("Error fetching products:", err);
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error("Error fetching products:", message);
         return [];
     }
 }
@@ -132,8 +133,9 @@ export async function fetchNews(): Promise<News[]> {
 
         console.log(`Loaded ${newsCache.length} news items to cache with columns: ${header.join(', ')}`);
         return newsCache;
-    } catch (err) {
-        console.error("Error fetching news:", err);
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error("Error fetching news:", message);
         return [];
     }
 }
@@ -160,8 +162,9 @@ export async function fetchSystemPrompt(): Promise<string> {
         systemPromptCache = values[0][0];
         console.log("Loaded system prompt from sheet.");
         return systemPromptCache;
-    } catch (err) {
-        console.error("Error fetching system prompt:", err);
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error("Error fetching system prompt:", message);
         return "";
     }
 }
