@@ -1,5 +1,5 @@
 {
-  "name": "ec-voice-assistant",
+  "name": "makasete-bot",
   "version": "1.0.0",
   "description": "EC Site Embedded Voice AI Chatbot",
   "scripts": {
@@ -10,7 +10,8 @@
     "watch:widget": "vite build --config widget/vite.config.ts --watch",
     "build": "pnpm build:widget && tsc -p server",
     "start:prod": "node dist/server/index.js",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "typecheck": "tsc -p server --noEmit && tsc -p widget"
   },
   "dependencies": {
     "@elevenlabs/elevenlabs-js": "^2.28.0",
@@ -27,6 +28,7 @@
     "socket.io-client": "^4.7.2"
   },
   "devDependencies": {
+    "@eslint/js": "9.39.2",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/node": "^20.10.0",

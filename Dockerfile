@@ -2,21 +2,23 @@ FROM node:20-slim
 
 WORKDIR /app
 
-# Copy package info
-COPY package.json yarn.lock .yarnrc.yml ./
-COPY .yarn ./.yarn
+# Install pnpm
+RUN npm install -g pnpm
 
-# Install dependencies (frozen lockfile for stability)
-RUN yarn install --immutable
+# Copy package info
+COPY package.json pnpm-lock.yaml ./
+
+# Install dependencies
+RUN pnpm install --frozen-lockfile
 
 # Copy source code
 COPY . .
 
 # Build widget and server
-RUN yarn build
+RUN pnpm build
 
 # Expose port
 EXPOSE 8080
 
 # Start server
-CMD ["yarn", "start:prod"]
+CMD ["pnpm", "start:prod"]

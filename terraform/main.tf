@@ -105,8 +105,26 @@ resource "google_cloud_run_service" "default" {
             }
           }
         }
+        resources {
+          limits = {
+            cpu    = "1000m"
+            memory = "1024Mi"
+          }
+        }
       }
     }
+    metadata {
+      annotations = {
+        "autoscaling.knative.dev/minScale"  = "0"
+        "run.googleapis.com/cpu-allocation" = "always"
+      }
+    }
+  }
+
+  lifecycle {
+    ignore_changes = [
+      template[0].metadata[0].annotations["autoscaling.knative.dev/minScale"],
+    ]
   }
 
   traffic {

@@ -12,7 +12,7 @@ variable "region" {
 variable "service_name" {
   description = "Cloud Run Service Name"
   type        = string
-  default     = "ec-voice-bot"
+  default     = "makasete-bot"
 }
 
 variable "container_image" {

@@ -45,10 +45,26 @@ import { ChatWidget } from './widget';
     `;
     shadow.appendChild(container);
 
-    // Use production URL unless on localhost
-    const serverUrl = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-        ? 'http://localhost:8080'
-        : 'https://ec-voice-bot-o6mypnfjrq-an.a.run.app';
+    // Determine server URL from the script's own source (currentScript)
+    // This allows the widget to automatically connect back to the server it was served from.
+    let serverUrl = import.meta.env.VITE_SERVER_URL || '';
+
+    if (!serverUrl) {
+        const scriptTag = document.currentScript as HTMLScriptElement;
+        if (scriptTag && scriptTag.src) {
+            const url = new URL(scriptTag.src);
+            serverUrl = url.origin;
+        } else {
+            // Fallback for local development
+            serverUrl = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+                ? 'http://localhost:8080'
+                : '';
+        }
+    }
+
+    if (!serverUrl) {
+        console.error('MakaseteBot: Could not determine server URL.');
+    }
 
     new ChatWidget(shadow, serverUrl);
 })();
