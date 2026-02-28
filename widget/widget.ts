@@ -60,9 +60,11 @@ export class ChatWidget {
         this.appendMessage('bot', 'いらっしゃいませ。AI書店員の福蔵です。何かお探しの本はございますか？');
     }
 
+    private isAudioInitializing = false;
+
     private initSocket() {
         this.socket.on('connect', () => {
-            console.log('[MakaseteBot] Connected to server. ID:', this.socket.id);
+            console.log('[MakaseteBot] Socket.io connected. ID:', this.socket.id);
         });
 
         this.socket.on('text-chunk', (data: { content: string }) => {
@@ -70,16 +72,19 @@ export class ChatWidget {
         });
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        this.socket.on('audio-chunk', (data: { type: 'text' | 'audio', content: any }) => {
+        this.socket.on('audio-chunk', async (data: { type: 'text' | 'audio', content: any }) => {
             if (data.type === 'text') {
-                console.log('[MakaseteBot] New sentence started:', data.content);
                 this.appendMessage('bot', data.content, true);
                 
-                // Each new sentence is a fresh fMP4 stream. Reset to accept new header.
-                if (this.isAudioEnabled) {
-                    this.resetAudio();
-                    this.initAudio();
-                    this.audio.play().catch(() => {});
+                if (this.isAudioEnabled && !this.isAudioInitializing) {
+                    this.isAudioInitializing = true;
+                    // Resetting here can interrupt play(). 
+                    // Better to only init if not already open or if queue is empty.
+                    if (!this.isSourceOpen) {
+                        this.resetAudio();
+                        this.initAudio();
+                    }
+                    this.isAudioInitializing = false;
                 }
             } else if (data.type === 'audio') {
                 this.handleAudioChunk(data.content);
@@ -106,6 +111,12 @@ export class ChatWidget {
         this.appendMessage('user', text);
         this.input.value = '';
         this.showTypingIndicator();
+
+        if (useAudio) {
+            this.resetAudio();
+            this.initAudio();
+            this.audio.play().catch(e => console.log('[MakaseteBot] Interaction prime failed:', e));
+        }
 
         this.socket.emit('user-input', {
             text,
@@ -143,7 +154,7 @@ export class ChatWidget {
 
             try {
                 const sb = ms.addSourceBuffer(mimeType);
-                sb.mode = 'sequence';
+                sb.mode = 'sequence'; // Use sequence mode to handle separate chunks
                 this.sourceBuffer = sb;
                 sb.addEventListener('updateend', () => this.processAudioQueue());
                 sb.addEventListener('error', (e: Event) => console.error('[MakaseteBot] SourceBuffer error:', e));
