@@ -153,13 +153,23 @@ export class ChatWidget {
         });
     }
 
-    private handleAudioChunk(content: ArrayBuffer | string) {
-        if (!(content instanceof ArrayBuffer)) {
-            // Socket.io should deliver ArrayBuffer, but just in case
+    private handleAudioChunk(content: any) {
+        // Convert various binary formats to ArrayBuffer
+        let buffer: ArrayBuffer;
+        
+        if (content instanceof ArrayBuffer) {
+            buffer = content;
+        } else if (content instanceof Uint8Array || ArrayBuffer.isView(content)) {
+            buffer = content.buffer;
+        } else if (typeof content === 'object' && content !== null && content.type === 'Buffer') {
+            // Handle Socket.io Buffer serialization
+            buffer = new Uint8Array(content.data).buffer;
+        } else {
+            console.warn('[MakaseteBot] Unknown audio data format:', typeof content);
             return;
         }
-        
-        this.audioQueue.push(content);
+
+        this.audioQueue.push(buffer);
         this.processAudioQueue();
     }
 
@@ -205,14 +215,18 @@ export class ChatWidget {
             });
         }
 
-        this.audioToggleBtn.addEventListener('click', () => {
+        this.audioToggleBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
             this.isAudioEnabled = !this.isAudioEnabled;
+            console.log('[MakaseteBot] Audio toggle clicked. New state:', this.isAudioEnabled);
             this.updateAudioToggleUI();
 
             if (this.isAudioEnabled) {
                 this.resetAudio();
                 this.initAudio();
-                this.audio.play().catch(e => console.log('[MakaseteBot] Autoplay priming error:', e));
+                this.audio.play()
+                    .then(() => console.log('[MakaseteBot] Audio playback primed successfully'))
+                    .catch(err => console.warn('[MakaseteBot] Audio prime failed:', err));
             }
         });
     }
