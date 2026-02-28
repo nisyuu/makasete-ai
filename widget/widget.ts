@@ -131,6 +131,7 @@ export class ChatWidget {
             if (this.chatWindow.classList.contains('open')) {
                 // Initialize audio on user interaction to unlock autoplay policies
                 this.initAudio();
+                this.audio.play().catch(e => console.log('Autoplay blocked:', e));
             }
         });
 

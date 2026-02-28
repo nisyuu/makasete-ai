@@ -84,7 +84,10 @@ io.on('connection', (socket) => {
                     });
 
                     await new Promise((resolve, reject) => {
-                        audioStream.on('end', resolve);
+                        audioStream.on('end', () => {
+                            // Add a tiny buffer between sentences
+                            setTimeout(resolve, 300);
+                        });
                         audioStream.on('error', reject);
                     });
                 } catch (e) {
