@@ -72,7 +72,15 @@ export class ChatWidget {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         this.socket.on('audio-chunk', (data: { type: 'text' | 'audio', content: any }) => {
             if (data.type === 'text') {
+                console.log('[MakaseteBot] New sentence started:', data.content);
                 this.appendMessage('bot', data.content, true);
+                
+                // Each new sentence is a fresh fMP4 stream. Reset to accept new header.
+                if (this.isAudioEnabled) {
+                    this.resetAudio();
+                    this.initAudio();
+                    this.audio.play().catch(() => {});
+                }
             } else if (data.type === 'audio') {
                 this.handleAudioChunk(data.content);
             }
@@ -98,13 +106,6 @@ export class ChatWidget {
         this.appendMessage('user', text);
         this.input.value = '';
         this.showTypingIndicator();
-
-        // If audio is enabled, reset and prime for the incoming stream
-        if (useAudio) {
-            this.resetAudio();
-            this.initAudio();
-            this.audio.play().catch(e => console.log('[MakaseteBot] Autoplay priming error:', e));
-        }
 
         this.socket.emit('user-input', {
             text,
