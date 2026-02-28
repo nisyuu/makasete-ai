@@ -1,30 +1,64 @@
 import fs from 'fs';
 import path from 'path';
-import { google } from 'googleapis';
+import { google, sheets_v4 } from 'googleapis';
 import { config } from '../config';
 
 export interface Product {
     id: string;
     title: string;
-    author: string;
-    price: string;
-    category: string;
-    image_url: string;
-    description: string;
-    amazon_link: string;
-    amazon_kindle_link: string;
-    published_at: string;
+    [key: string]: string;
 }
 
 export interface News {
     id: string;
     title: string;
-    content: string;
-    published_at: string;
+    [key: string]: string;
 }
 
 let productCache: Product[] = [];
 let newsCache: News[] = [];
+
+/**
+ * Maps spreadsheet rows to objects using the first row as keys.
+ * Converts column names to snake_case for consistency.
+ */
+function mapRowsToObjects<T>(header: string[], rows: string[][]): T[] {
+    return rows.map((row) => {
+        const obj: Record<string, string> = {};
+        header.forEach((key, index) => {
+            if (!key) return;
+            // Convert "Column Name" or "columnName" to "column_name"
+            const safeKey = key
+                .trim()
+                .replace(/([a-z])([A-Z])/g, '$1_$2')
+                .toLowerCase()
+                .replace(/\s+/g, '_');
+            obj[safeKey] = row[index] || '';
+        });
+        return obj as T;
+    });
+}
+
+async function getSheetsClient(): Promise<sheets_v4.Sheets> {
+    const keyName = 'tasukari-4170ed37d5cd.json';
+    const absoluteKeyPath = path.join(process.cwd(), keyName);
+
+    const scopes = ['https://www.googleapis.com/auth/spreadsheets.readonly'];
+    const keyFile = fs.existsSync(absoluteKeyPath) ? absoluteKeyPath : undefined;
+
+    if (keyFile) {
+        console.log("Using local key file for Sheets Auth");
+    } else {
+        console.log("Using ADC for Sheets Auth");
+    }
+
+    const auth = new google.auth.GoogleAuth({
+        scopes,
+        keyFile,
+    });
+
+    return google.sheets({ version: 'v4', auth });
+}
 
 export async function fetchProducts(): Promise<Product[]> {
     if (!config.googleSheetsId) {
@@ -33,62 +67,25 @@ export async function fetchProducts(): Promise<Product[]> {
     }
 
     try {
-        // Setup Google Sheets API
-        // Authentication strategy:
-        // 1. If key.json is present (for local dev), set keyFilename.
-        // 2. If missing (Cloud Run), use ADC (empty config).
-
-        const keyName = 'tasukari-4170ed37d5cd.json';
-        const absoluteKeyPath = path.join(process.cwd(), keyName);
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const authConfig: any = {
-            scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
-        };
-
-        if (fs.existsSync(absoluteKeyPath)) {
-            console.log("Using local key file for Sheets Auth");
-            authConfig.keyFilename = absoluteKeyPath;
-        } else {
-            console.log("Using ADC for Sheets Auth");
-        }
-
-        const auth = new google.auth.GoogleAuth(authConfig);
-
-        const client = await auth.getClient();
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const sheets = google.sheets({ version: 'v4', auth: client as any });
-
+        const sheets = await getSheetsClient();
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: config.googleSheetsId,
-            range: 'books!A2:J', // Exclude header row (A1)
+            range: 'books!A1:Z', // Fetch including header row
         });
 
-        const rows = response.data.values;
-        if (!rows || rows.length === 0) {
-            console.log('No data found in sheets.');
+        const allValues = response.data.values;
+        if (!allValues || allValues.length < 1) {
+            console.log('No data found in books sheet.');
             return [];
         }
 
-        // Mapping columns safely
-        productCache = rows.map((row) => ({
-            id: row[0] || '',
-            title: row[1] || '',
-            author: row[2] || '',
-            price: row[3] || '',
-            category: row[4] || '',
-            image_url: row[5] || '',
-            description: row[6] || '',
-            amazon_link: row[7] || '',
-            amazon_kindle_link: row[8] || '',
-            published_at: row[9] || '',
-        }));
+        const [header, ...rows] = allValues;
+        productCache = mapRowsToObjects<Product>(header, rows);
 
-        console.log(`Loaded ${productCache.length} products to cache.`);
+        console.log(`Loaded ${productCache.length} products to cache with columns: ${header.join(', ')}`);
         return productCache;
     } catch (err) {
-        console.error("Error fetching sheets:", err);
-        // Fallback or empty
+        console.error("Error fetching products:", err);
         return [];
     }
 }
@@ -100,43 +97,22 @@ export async function fetchNews(): Promise<News[]> {
     }
 
     try {
-        const keyName = 'tasukari-4170ed37d5cd.json';
-        const absoluteKeyPath = path.join(process.cwd(), keyName);
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const authConfig: any = {
-            scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
-        };
-
-        if (fs.existsSync(absoluteKeyPath)) {
-            authConfig.keyFilename = absoluteKeyPath;
-        }
-
-        const auth = new google.auth.GoogleAuth(authConfig);
-
-        const client = await auth.getClient();
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const sheets = google.sheets({ version: 'v4', auth: client as any });
-
+        const sheets = await getSheetsClient();
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: config.googleSheetsId,
-            range: 'news!A2:D', // Exclude header
+            range: 'news!A1:Z',
         });
 
-        const rows = response.data.values;
-        if (!rows || rows.length === 0) {
+        const allValues = response.data.values;
+        if (!allValues || allValues.length < 1) {
             console.log('No news data found.');
             return [];
         }
 
-        newsCache = rows.map((row) => ({
-            id: row[0] || '',
-            title: row[1] || '',
-            content: row[2] || '',
-            published_at: row[3] || '',
-        }));
+        const [header, ...rows] = allValues;
+        newsCache = mapRowsToObjects<News>(header, rows);
 
-        console.log(`Loaded ${newsCache.length} news items to cache.`);
+        console.log(`Loaded ${newsCache.length} news items to cache with columns: ${header.join(', ')}`);
         return newsCache;
     } catch (err) {
         console.error("Error fetching news:", err);
