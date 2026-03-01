@@ -45,8 +45,11 @@ export class GeminiTTSService implements TTSService {
                 client.text.synthesize({
                     requestBody: {
                         input: { text },
-                        voice: { languageCode: 'ja-JP', name: 'ja-JP-Neural2-B' }, // Natural Japanese voice
-                        audioConfig: { audioEncoding: 'MP3' },
+                        voice: { languageCode: 'ja-JP', name: 'ja-JP-Neural2-D' }, 
+                        audioConfig: { 
+                            audioEncoding: 'MP3',
+                            speakingRate: 1.15, // Slightly faster
+                        },
                     }
                 }, (err, res) => {
                     if (err) reject(err);
