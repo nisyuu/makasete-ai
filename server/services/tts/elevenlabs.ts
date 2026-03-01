@@ -18,7 +18,6 @@ export class ElevenLabsTTSService implements TTSService {
         const modelId = config.modelId || 'eleven_flash_v2_5';
 
         try {
-            console.log(`[ElevenLabs] Converting text: "${text.substring(0, 20)}..."`);
             const audioStream = await client.textToSpeech.convert(voiceId, {
                 text,
                 modelId: modelId,

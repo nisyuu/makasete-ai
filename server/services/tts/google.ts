@@ -40,7 +40,6 @@ export class GeminiTTSService implements TTSService {
         const client = await this.getClient();
 
         try {
-            console.log(`[GeminiTTS] Converting text: "${text.substring(0, 20)}..."`);
             const [response] = await new Promise<[texttospeech_v1.Schema$SynthesizeSpeechResponse]>((resolve, reject) => {
                 client.text.synthesize({
                     requestBody: {

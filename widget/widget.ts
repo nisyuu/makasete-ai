@@ -29,7 +29,6 @@ export class ChatWidget {
 
     constructor(shadowRoot: ShadowRoot, serverUrl: string) {
         this.shadowRoot = shadowRoot;
-        console.log('[MakaseteBot] Connecting to:', serverUrl);
         this.socket = io(serverUrl);
 
         // Element binding
@@ -59,7 +58,7 @@ export class ChatWidget {
 
     private initSocket() {
         this.socket.on('connect', () => {
-            console.log('[MakaseteBot] Socket connected');
+            // Socket connected
         });
 
         this.socket.on('text-chunk', (data: { content: string }) => {
@@ -146,7 +145,6 @@ export class ChatWidget {
     }
 
     private resetAudioState() {
-        console.log('[MakaseteBot] Stopping and resetting audio');
         this.audio.pause();
         this.isPlaying = false;
         this.audioQueue = [];
@@ -281,15 +279,36 @@ export class ChatWidget {
         }
 
         const formatText = (rawText: string) => {
-            const safeText = rawText
-                .replace(/&/g, "&amp;")
-                .replace(/</g, "&lt;")
-                .replace(/>/g, "&gt;");
+            // 1. Escape HTML to prevent basic XSS
+            const escapeHtml = (str: string) => {
+                return str.replace(/[&<>"']/g, (m) => ({
+                    '&': '&amp;',
+                    '<': '&lt;',
+                    '>': '&gt;',
+                    '"': '&quot;',
+                    "'": '&#39;'
+                }[m] || m));
+            };
 
-            return safeText.replace(/\[((?:[^[\]]|\[[^\]]*\])+)\]\(([^)]+)\)/g, (_match, linkText, url) => {
-                const isSafeUrl = /^(https?:\/\/|\/)/i.test(url.trim());
-                const finalUrl = isSafeUrl ? url.trim() : '#';
-                return `<a href="${finalUrl}" target="_blank" rel="noopener noreferrer">${linkText}</a>`;
+            // 2. Safe URL check for Markdown links
+            // Only allow http, https, and relative paths. Block javascript:, etc.
+            const sanitizeUrl = (url: string) => {
+                const trimmed = url.trim();
+                if (/^(https?:\/\/|\/)/i.test(trimmed)) {
+                    return trimmed;
+                }
+                return '#';
+            };
+
+            // First, escape the entire text
+            const escapedText = escapeHtml(rawText);
+
+            // Then, selectively allow Markdown links [text](url)
+            // Note: We use a regex that matches the escaped brackets/parens if necessary, 
+            // but since we escaped the whole text first, we need to match the literal chars.
+            return escapedText.replace(/\[((?:[^[\]]|\[[^\]]*\])+)\]\(([^)]+)\)/g, (_match, linkText, url) => {
+                const safeUrl = sanitizeUrl(url);
+                return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${linkText}</a>`;
             });
         };
 

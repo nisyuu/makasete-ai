@@ -1,0 +1,17 @@
+.git
+.gitignore
+node_modules
+dist
+build
+.env
+.env.*
+google-key.json
+terraform.tfvars
+*.tfvars
+terraform/
+.terraform/
+README.md
+LICENSE
+Dockerfile
+.clasp.json
+gas/

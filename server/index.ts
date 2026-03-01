@@ -43,15 +43,24 @@ const io = new Server(httpServer, {
 // Security: Simple Socket.io rate limiting
 const socketConnections = new Map<string, number>();
 
+function getClientIp(socket: Socket): string {
+    const forwarded = socket.handshake.headers['x-forwarded-for'];
+    if (forwarded) {
+        return (Array.isArray(forwarded) ? forwarded[0] : forwarded.split(',')[0]).trim();
+    }
+    return socket.handshake.address;
+}
+
 io.use((socket, next) => {
-    const ip = socket.handshake.address;
-    const count = socketConnections.get(ip) || 0;
+    const clientIp = getClientIp(socket);
+    const count = socketConnections.get(clientIp) || 0;
     if (count >= 5) {
         return next(new Error("Too many connections"));
     }
-    socketConnections.set(ip, count + 1);
+    socketConnections.set(clientIp, count + 1);
     next();
 });
+
 
 // Middleware
 app.use(cors({
@@ -80,7 +89,6 @@ Promise.all([fetchProducts(), fetchNews(), fetchSystemPrompt()]).then(() => {
 
 // WebSocket logic
 io.on('connection', (socket) => {
-    console.log('Client connected:', socket.id);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chatHistory: any[] = [];
 
@@ -88,11 +96,9 @@ io.on('connection', (socket) => {
         const { text, isVoiceInput } = data;
         
         if (!text || typeof text !== 'string' || text.length > 1000) {
-            socket.emit('error', { message: "Input too long or invalid" });
+            socket.emit('error', { message: "Input is invalid" });
             return;
         }
-
-        console.log(`Received input: ${text.substring(0, 50)}..., isVoice: ${isVoiceInput}`);
 
         chatHistory.push({ role: "user", parts: [{ text }] });
 
@@ -135,19 +141,18 @@ io.on('connection', (socket) => {
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : String(error);
             console.error("Error processing input:", message);
-            socket.emit('error', { message: `Processing error: ${message}` });
+            socket.emit('error', { message: "Internal server error occurred." });
         }
     });
 
     socket.on('disconnect', () => {
-        const ip = socket.handshake.address;
-        const count = socketConnections.get(ip) || 1;
-        if (count <= 1) {
-            socketConnections.delete(ip);
+        const clientIp = getClientIp(socket);
+        const count = socketConnections.get(clientIp);
+        if (count && count > 1) {
+            socketConnections.set(clientIp, count - 1);
         } else {
-            socketConnections.set(ip, count - 1);
+            socketConnections.delete(clientIp);
         }
-        console.log('Client disconnected:', socket.id);
     });
 });
 
@@ -165,7 +170,6 @@ async function processSentence(socket: Socket, sentence: string, isVoiceInput: b
             if (!cleanSentence) return; // Skip if nothing to read
 
             const ttsService = getTTSService();
-            console.log(`[${ttsService.getName()}] Generating audio for: "${cleanSentence.substring(0, 20)}..."`);
             const audioStream: NodeJS.ReadableStream = await ttsService.generateSpeechStream(cleanSentence);
 
             const chunks: Buffer[] = [];
@@ -176,7 +180,6 @@ async function processSentence(socket: Socket, sentence: string, isVoiceInput: b
             await new Promise((resolve, reject) => {
                 audioStream.on('end', () => {
                     const fullBuffer = Buffer.concat(chunks);
-                    console.log(`[TTS] Sending full audio buffer: ${fullBuffer.length} bytes`);
                     socket.emit('audio-chunk', { type: 'audio', content: fullBuffer });
                     setTimeout(resolve, 50); // Minimal gap
                 });
