@@ -1,0 +1,32 @@
+name: Deploy Google Apps Script
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'gas/**'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/checkout@v4
+        with:
+          node-version: '20'
+
+      - name: Install clasp
+        run: npm install -g @google/clasp
+
+      - name: Create CLASP_AUTH file
+        run: echo "$CLASP_AUTH" > ~/.clasprc.json
+        env:
+          CLASP_AUTH: ${{ secrets.CLASP_AUTH }}
+
+      - name: Push to GAS
+        run: |
+          cd gas
+          clasp push -f
