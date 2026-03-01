@@ -22,9 +22,8 @@ jobs:
         run: npm install -g @google/clasp
 
       - name: Create CLASP_AUTH file
-        run: echo "$CLASP_AUTH" > ~/.clasprc.json
-        env:
-          CLASP_AUTH: ${{ secrets.CLASP_AUTH }}
+        run: |
+          echo '${{ secrets.CLASP_AUTH }}' > ~/.clasprc.json
 
       - name: Push to GAS
         run: |
