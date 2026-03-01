@@ -1,12 +1,18 @@
 import ffmpeg from 'fluent-ffmpeg';
 import ffmpegPath from 'ffmpeg-static';
 import { Readable, PassThrough } from 'stream';
+import fs from 'fs';
 
 // Set ffmpeg path
-if (ffmpegPath) {
+const systemFfmpeg = '/usr/bin/ffmpeg';
+if (fs.existsSync(systemFfmpeg)) {
+    console.log(`[FFmpeg] Using system ffmpeg at ${systemFfmpeg}`);
+    ffmpeg.setFfmpegPath(systemFfmpeg);
+} else if (ffmpegPath) {
+    console.log(`[FFmpeg] Using static ffmpeg at ${ffmpegPath}`);
     ffmpeg.setFfmpegPath(ffmpegPath);
 } else {
-    console.log("Static FFmpeg not found, using system ffmpeg binary.");
+    console.error("[FFmpeg] No ffmpeg binary found!");
 }
 
 /**

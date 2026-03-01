@@ -104,7 +104,10 @@ export class ChatWidget {
         if (useAudio) {
             this.resetAudio();
             this.initAudio();
-            this.audio.play().catch(e => console.log('[MakaseteBot] Interaction prime failed:', e));
+            // User interaction context - required for browsers to allow audio
+            if (this.audio.src) {
+                this.audio.play().catch(e => console.log('[MakaseteBot] Autoplay prime deferred:', e.name));
+            }
         }
 
         this.socket.emit('user-input', {
@@ -119,10 +122,12 @@ export class ChatWidget {
         this.audioQueue = [];
         this.isSourceOpen = false;
         this.sourceBuffer = null;
+        
         if (this.audio.src) {
             URL.revokeObjectURL(this.audio.src);
             this.audio.src = '';
         }
+
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const MediaSourceClass = window.MediaSource || (window as any).ManagedMediaSource;
         if (MediaSourceClass) {
@@ -131,8 +136,9 @@ export class ChatWidget {
     }
 
     private initAudio() {
-        if (!this.mediaSource || this.audio.src) return;
+        if (!this.mediaSource) return;
 
+        console.log('[MakaseteBot] Initializing audio source');
         this.audio.src = URL.createObjectURL(this.mediaSource);
         const ms = this.mediaSource;
 
