@@ -23,6 +23,8 @@ export class GeminiTTSService implements TTSService {
             keyFile = process.env.GOOGLE_APPLICATION_CREDENTIALS;
         } else if (fs.existsSync(absoluteKeyPath)) {
             keyFile = absoluteKeyPath;
+        } else if (!process.env.K_SERVICE) {
+            console.warn("[GeminiTTS] No authentication found. Please provide google-key.json or set GOOGLE_APPLICATION_CREDENTIALS.");
         }
 
         const auth = new google.auth.GoogleAuth({

@@ -7,8 +7,7 @@ import { rateLimit } from 'express-rate-limit';
 import { config } from './config';
 import { fetchProducts, getProducts, fetchNews, getNews, fetchSystemPrompt } from './services/sheets';
 import { generateResponseStream } from './services/gemini';
-import { getTTSService } from './services/tts/factory'; // Use factory
-import { transcodeToFmp4 } from './services/transcode';
+import { getTTSService } from './services/tts/factory';
 import { StreamBuffer } from './utils/streamBuffer';
 
 const app = express();
@@ -154,29 +153,32 @@ io.on('connection', (socket) => {
 
 async function processSentence(socket: Socket, sentence: string, isVoiceInput: boolean) {
     if (isVoiceInput) {
-        // Send text first
         socket.emit('audio-chunk', { type: 'text', content: sentence });
 
         try {
-            const cleanSentence = removeMarkdownLinks(sentence);
+            // Cleanup: remove links, emojis, and extra symbols for cleaner TTS
+            const cleanSentence = removeMarkdownLinks(sentence)
+                .replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '') // Remove Emojis
+                .replace(/[＊*#]/g, '') // Remove common markdown symbols
+                .trim();
+
+            if (!cleanSentence) return; // Skip if nothing to read
+
             const ttsService = getTTSService();
-            console.log(`[${ttsService.getName()}] Requesting audio for: "${cleanSentence.substring(0, 20)}..."`);
-            let audioStream: NodeJS.ReadableStream = await ttsService.generateSpeechStream(cleanSentence);
+            console.log(`[${ttsService.getName()}] Generating audio for: "${cleanSentence.substring(0, 20)}..."`);
+            const audioStream: NodeJS.ReadableStream = await ttsService.generateSpeechStream(cleanSentence);
 
-            // Always transcode to fMP4 for MSE compatibility
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            audioStream = transcodeToFmp4(audioStream as any);
-
-            let totalBytes = 0;
+            const chunks: Buffer[] = [];
             audioStream.on('data', (chunk: Buffer) => {
-                totalBytes += chunk.length;
-                socket.emit('audio-chunk', { type: 'audio', content: chunk });
+                chunks.push(chunk);
             });
 
             await new Promise((resolve, reject) => {
                 audioStream.on('end', () => {
-                    console.log(`[TTS] Sent ${totalBytes} bytes of audio for sentence.`);
-                    setTimeout(resolve, 300);
+                    const fullBuffer = Buffer.concat(chunks);
+                    console.log(`[TTS] Sending full audio buffer: ${fullBuffer.length} bytes`);
+                    socket.emit('audio-chunk', { type: 'audio', content: fullBuffer });
+                    setTimeout(resolve, 50); // Minimal gap
                 });
                 audioStream.on('error', (err) => {
                     console.error("[TTS] Stream error:", err);

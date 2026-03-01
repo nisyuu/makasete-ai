@@ -1,15 +1,16 @@
 import { io, Socket } from 'socket.io-client';
 
+interface AudioWithTimeout extends HTMLAudioElement {
+    _playTimeout?: NodeJS.Timeout | null;
+}
+
 export class ChatWidget {
     private shadowRoot: ShadowRoot;
     private socket: Socket;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    private mediaSource: MediaSource | any;
-    private sourceBuffer: SourceBuffer | null = null;
-    private audioQueue: ArrayBufferLike[] = [];
-    private isSourceOpen = false;
-    private audio: HTMLAudioElement;
-    private isIOS = false; // Add flag for iOS detection
+    private audioQueue: Blob[] = [];
+    private isPlaying = false;
+    private audio: AudioWithTimeout;
+    private isIOS = false;
 
     // UI Elements
     private chatWindow: HTMLElement;
@@ -22,9 +23,9 @@ export class ChatWidget {
 
     // State
     private isRecording = false;
-    private isAudioEnabled = false; // Default OFF
+    private isAudioEnabled = false;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    private recognition: any = null; // Web Speech API
+    private recognition: any = null;
 
     constructor(shadowRoot: ShadowRoot, serverUrl: string) {
         this.shadowRoot = shadowRoot;
@@ -40,54 +41,123 @@ export class ChatWidget {
         this.launcherBtn = this.shadowRoot.querySelector('.launcher-button') as HTMLButtonElement;
         this.audioToggleBtn = this.shadowRoot.querySelector('.audio-toggle-btn') as HTMLButtonElement;
 
-        // Detect iOS and Safari (both need fMP4 for MSE)
+        // Detect device
         const ua = navigator.userAgent;
         this.isIOS = /iPhone|iPad|iPod/i.test(ua) || 
-                     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) ||
-                     (/^((?!chrome|android).)*safari/i.test(ua));
+                     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
         
-        console.log('[MakaseteBot] Device info:', { isIOS: this.isIOS, ua });
-
         this.audio = new Audio();
-        this.audio.disableRemotePlayback = true;
+        this.audio.addEventListener('ended', () => this.onAudioEnded());
         
         this.initSocket();
         this.bindEvents();
         this.initSpeechRecognition();
         this.updateAudioToggleUI();
         
-        // Initial Greeting
         this.appendMessage('bot', 'いらっしゃいませ。AI書店員の福蔵です。何かお探しの本はございますか？');
     }
 
     private initSocket() {
         this.socket.on('connect', () => {
-            console.log('[MakaseteBot] Socket.io connected. ID:', this.socket.id);
+            console.log('[MakaseteBot] Socket connected');
         });
 
         this.socket.on('text-chunk', (data: { content: string }) => {
             this.appendMessage('bot', data.content, true);
         });
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        this.socket.on('audio-chunk', async (data: { type: 'text' | 'audio', content: any }) => {
+        this.socket.on('audio-chunk', async (data: { type: 'text' | 'audio', content: unknown }) => {
             if (data.type === 'text') {
-                this.appendMessage('bot', data.content, true);
-                // No longer resetting audio here to prevent AbortError and race conditions.
-                // Initialization is handled in sendMessage() or the toggle handler.
+                this.appendMessage('bot', data.content as string, true);
             } else if (data.type === 'audio') {
                 this.handleAudioChunk(data.content);
             }
         });
 
-        this.socket.on('response-complete', (data) => {
-            console.log('[MakaseteBot] Response complete:', data);
-        });
-
         this.socket.on('error', (data: { message: string }) => {
-            console.error("[MakaseteBot] Server Error:", data.message);
+            console.error("[MakaseteBot] Server error:", data.message);
             this.appendMessage('bot', `エラーが発生しました: ${data.message}`);
         });
+    }
+
+    private handleAudioChunk(content: unknown) {
+        if (!this.isAudioEnabled) return;
+
+        let rawData: ArrayBufferLike;
+        if (content instanceof ArrayBuffer) {
+            rawData = content;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } else if (content && typeof content === 'object' && 'data' in content && (content as any).type === 'Buffer') {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            rawData = new Uint8Array((content as any).data).buffer;
+        } else if (content instanceof Uint8Array) {
+            rawData = content.buffer;
+        } else {
+            console.warn('[MakaseteBot] Unexpected audio format');
+            return;
+        }
+
+        const blob = new Blob([rawData as ArrayBuffer], { type: 'audio/mpeg' });
+        this.audioQueue.push(blob);
+        this.playNextInQueue();
+    }
+
+    private playNextInQueue() {
+        if (this.isPlaying || this.audioQueue.length === 0) return;
+
+        this.isPlaying = true;
+        const nextBlob = this.audioQueue.shift();
+        if (nextBlob) {
+            if (this.audio.src) {
+                URL.revokeObjectURL(this.audio.src);
+            }
+            this.audio.src = URL.createObjectURL(nextBlob);
+            
+            // Safety timeout: If audio doesn't start/end within 15s, force next
+            const timeout = setTimeout(() => {
+                if (this.isPlaying) {
+                    console.warn('[MakaseteBot] Audio playback timed out');
+                    this.onAudioEnded();
+                }
+            }, 15000);
+
+            this.audio.play()
+                .then(() => {
+                    // Play started
+                })
+                .catch(e => {
+                    console.warn('[MakaseteBot] Play failed:', e);
+                    clearTimeout(timeout);
+                    this.onAudioEnded();
+                });
+
+            // Store timeout ID to clear it when audio actually ends
+            this.audio._playTimeout = timeout;
+        }
+    }
+
+    private onAudioEnded() {
+        if (this.audio._playTimeout) {
+            clearTimeout(this.audio._playTimeout);
+            this.audio._playTimeout = null;
+        }
+        this.isPlaying = false;
+        this.playNextInQueue();
+    }
+
+    private resetAudioState() {
+        console.log('[MakaseteBot] Stopping and resetting audio');
+        this.audio.pause();
+        this.isPlaying = false;
+        this.audioQueue = [];
+        if (this.audio.src) {
+            URL.revokeObjectURL(this.audio.src);
+            this.audio.src = '';
+        }
+        if (this.audio._playTimeout) {
+            clearTimeout(this.audio._playTimeout);
+            this.audio._playTimeout = null;
+        }
     }
 
     private sendMessage(isVoice = false) {
@@ -95,19 +165,14 @@ export class ChatWidget {
         if (!text) return;
 
         const useAudio = isVoice || this.isAudioEnabled;
-        console.log('[MakaseteBot] Sending message. Audio Enabled:', useAudio);
-
         this.appendMessage('user', text);
         this.input.value = '';
         this.showTypingIndicator();
 
         if (useAudio) {
-            this.resetAudio();
-            this.initAudio();
-            // User interaction context - required for browsers to allow audio
-            if (this.audio.src) {
-                this.audio.play().catch(e => console.log('[MakaseteBot] Autoplay prime deferred:', e.name));
-            }
+            this.resetAudioState();
+            // Unlock audio element
+            this.audio.play().catch(() => {});
         }
 
         this.socket.emit('user-input', {
@@ -117,92 +182,11 @@ export class ChatWidget {
         });
     }
 
-    private resetAudio() {
-        console.log('[MakaseteBot] Resetting audio state');
-        this.audioQueue = [];
-        this.isSourceOpen = false;
-        this.sourceBuffer = null;
-        
-        if (this.audio.src) {
-            URL.revokeObjectURL(this.audio.src);
-            this.audio.src = '';
-        }
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const MediaSourceClass = window.MediaSource || (window as any).ManagedMediaSource;
-        if (MediaSourceClass) {
-            this.mediaSource = new MediaSourceClass();
-        }
-    }
-
-    private initAudio() {
-        if (!this.mediaSource) return;
-
-        console.log('[MakaseteBot] Initializing audio source');
-        this.audio.src = URL.createObjectURL(this.mediaSource);
-        const ms = this.mediaSource;
-
-        ms.addEventListener('sourceopen', () => {
-            console.log('[MakaseteBot] MediaSource opened');
-            this.isSourceOpen = true;
-            const mimeType = 'audio/mp4; codecs="mp4a.40.2"';
-
-            try {
-                const sb = ms.addSourceBuffer(mimeType);
-                sb.mode = 'sequence'; // Use sequence mode to handle separate chunks
-                this.sourceBuffer = sb;
-                sb.addEventListener('updateend', () => this.processAudioQueue());
-                sb.addEventListener('error', (e: Event) => console.error('[MakaseteBot] SourceBuffer error:', e));
-                this.processAudioQueue();
-            } catch (e) {
-                console.error('[MakaseteBot] AddSourceBuffer failed:', e);
-            }
-        });
-    }
-
-    private handleAudioChunk(content: unknown) {
-        // Convert various binary formats to ArrayBuffer
-        let buffer: ArrayBufferLike;
-        
-        if (content instanceof ArrayBuffer) {
-            buffer = content;
-        } else if (content instanceof Uint8Array || ArrayBuffer.isView(content)) {
-            buffer = content.buffer;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } else if (typeof content === 'object' && content !== null && (content as any).type === 'Buffer') {
-            // Handle Socket.io Buffer serialization
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            buffer = new Uint8Array((content as any).data).buffer;
-        } else {
-            console.warn('[MakaseteBot] Unknown audio data format:', typeof content);
-            return;
-        }
-
-        this.audioQueue.push(buffer);
-        this.processAudioQueue();
-    }
-
-    private processAudioQueue() {
-        if (this.audioQueue.length > 0 && this.sourceBuffer && !this.sourceBuffer.updating && this.isSourceOpen) {
-            const chunk = this.audioQueue.shift();
-            if (chunk) {
-                try {
-                    this.sourceBuffer.appendBuffer(chunk as ArrayBuffer);
-                } catch (e) {
-                    console.error('[MakaseteBot] Append buffer error:', e);
-                }
-            }
-        }
-    }
-
     private bindEvents() {
         this.launcherBtn.addEventListener('click', () => {
-            this.chatWindow.classList.toggle('open');
-            if (this.chatWindow.classList.contains('open')) {
-                // Initialize audio on user interaction to unlock autoplay policies
-                this.resetAudio();
-                this.initAudio();
-                this.audio.play().catch(e => console.log('[MakaseteBot] Autoplay priming error:', e));
+            const isOpen = this.chatWindow.classList.toggle('open');
+            if (isOpen) {
+                this.audio.play().catch(() => {});
             }
         });
 
@@ -227,15 +211,11 @@ export class ChatWidget {
         this.audioToggleBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             this.isAudioEnabled = !this.isAudioEnabled;
-            console.log('[MakaseteBot] Audio toggle clicked. New state:', this.isAudioEnabled);
             this.updateAudioToggleUI();
-
+            
+            this.resetAudioState();
             if (this.isAudioEnabled) {
-                this.resetAudio();
-                this.initAudio();
-                this.audio.play()
-                    .then(() => console.log('[MakaseteBot] Audio playback primed successfully'))
-                    .catch(err => console.warn('[MakaseteBot] Audio prime failed:', err));
+                this.audio.play().catch(() => {});
             }
         });
     }
@@ -268,7 +248,7 @@ export class ChatWidget {
             this.recognition.onresult = (event: any) => {
                 const text = event.results[0][0].transcript;
                 this.input.value = text;
-                this.sendMessage(true); // Auto send as voice input
+                this.sendMessage(true);
             };
 
             this.recognition.onend = () => {
@@ -296,58 +276,46 @@ export class ChatWidget {
     private currentBotMessageRaw: string = "";
 
     private appendMessage(role: 'user' | 'bot', text: string, appendToLast = false) {
-        // Ensure typing indicator is removed before showing bot response
         if (role === 'bot') {
             this.hideTypingIndicator();
         }
 
-        // Helper to format text with links
         const formatText = (rawText: string) => {
-            // Regex to match [text](url)
-            // We escape HTML characters first to prevent XSS from raw text, then replace markdown links
             const safeText = rawText
                 .replace(/&/g, "&amp;")
                 .replace(/</g, "&lt;")
                 .replace(/>/g, "&gt;");
 
             return safeText.replace(/\[((?:[^[\]]|\[[^\]]*\])+)\]\(([^)]+)\)/g, (_match, linkText, url) => {
-                // Security: Basic URL sanitization to prevent javascript: pseudo-protocol XSS
                 const isSafeUrl = /^(https?:\/\/|\/)/i.test(url.trim());
                 const finalUrl = isSafeUrl ? url.trim() : '#';
                 return `<a href="${finalUrl}" target="_blank" rel="noopener noreferrer">${linkText}</a>`;
             });
         };
 
-        // If appendToLast is true and last message is from bot, append text
         if (appendToLast && role === 'bot') {
             const lastMsg = this.timeline.lastElementChild;
             if (lastMsg && lastMsg.classList.contains('bot')) {
-                // Buffer the new text
                 this.currentBotMessageRaw += text;
-                // Re-render the full message
-                const newHtml = formatText(this.currentBotMessageRaw);
-                lastMsg.innerHTML = newHtml;
+                lastMsg.innerHTML = formatText(this.currentBotMessageRaw);
                 this.scrollToBottom();
                 return;
             }
         }
 
-        // New message
         if (role === 'bot') {
             this.currentBotMessageRaw = text;
         }
 
         const div = document.createElement('div');
         div.className = `message ${role}`;
-        div.innerHTML = formatText(text); // Use innerHTML to render <a> tags
+        div.innerHTML = formatText(text);
         this.timeline.appendChild(div);
         this.scrollToBottom();
     }
 
     private showTypingIndicator() {
-        // Prevent duplicate indicators
         if (this.timeline.querySelector('.typing-indicator')) return;
-
         const div = document.createElement('div');
         div.className = 'typing-indicator';
         div.innerHTML = `
@@ -367,6 +335,8 @@ export class ChatWidget {
     }
 
     private scrollToBottom() {
-        this.timeline.scrollTop = this.timeline.scrollHeight;
+        requestAnimationFrame(() => {
+            this.timeline.scrollTop = this.timeline.scrollHeight;
+        });
     }
 }

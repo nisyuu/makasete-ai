@@ -28,7 +28,8 @@ export function transcodeToFmp4(inputStream: Readable): Readable {
         .audioCodec('aac')
         .format('mp4')
         .outputOptions([
-            '-movflags frag_keyframe+empty_moov+default_base_moof',
+            '-movflags frag_keyframe+empty_moov+default_base_moof+faststart',
+            '-avoid_negative_ts make_zero',
             '-b:a 128k',
             '-ar 44100',
             '-ac 2'

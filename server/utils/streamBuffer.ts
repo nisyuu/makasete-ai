@@ -1,6 +1,6 @@
 export class StreamBuffer {
     private buffer: string = "";
-    private readonly punctuations = ["。", "、", "！", "？", "\n"];
+    private readonly punctuations = ["。", "！", "？", "\n"]; // Removed "、" for better flow
 
     public add(text: string): string[] {
         this.buffer += text;
