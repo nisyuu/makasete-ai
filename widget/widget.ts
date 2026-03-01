@@ -60,8 +60,6 @@ export class ChatWidget {
         this.appendMessage('bot', 'いらっしゃいませ。AI書店員の福蔵です。何かお探しの本はございますか？');
     }
 
-    private isAudioInitializing = false;
-
     private initSocket() {
         this.socket.on('connect', () => {
             console.log('[MakaseteBot] Socket.io connected. ID:', this.socket.id);
@@ -75,17 +73,8 @@ export class ChatWidget {
         this.socket.on('audio-chunk', async (data: { type: 'text' | 'audio', content: any }) => {
             if (data.type === 'text') {
                 this.appendMessage('bot', data.content, true);
-                
-                if (this.isAudioEnabled && !this.isAudioInitializing) {
-                    this.isAudioInitializing = true;
-                    // Resetting here can interrupt play(). 
-                    // Better to only init if not already open or if queue is empty.
-                    if (!this.isSourceOpen) {
-                        this.resetAudio();
-                        this.initAudio();
-                    }
-                    this.isAudioInitializing = false;
-                }
+                // No longer resetting audio here to prevent AbortError and race conditions.
+                // Initialization is handled in sendMessage() or the toggle handler.
             } else if (data.type === 'audio') {
                 this.handleAudioChunk(data.content);
             }
