@@ -176,7 +176,7 @@ export async function fetchSystemPrompt(): Promise<string> {
             systemPromptCache = values[0][0];
         }
         checkAllDataReady();
-        return systemPromptCache;
+        return systemPromptCache || "";
     } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         console.error("Error fetching system prompt:", message);
