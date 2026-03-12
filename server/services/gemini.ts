@@ -1,6 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { config } from "../config";
-import { getProducts, getSystemPrompt, getFaqs, getServices } from "./sheets";
+import { getAllSheetData, getSystemPrompt } from "./sheets";
 
 let genAI: GoogleGenerativeAI;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -27,37 +27,33 @@ export async function generateResponseStream(prompt: string, history: any[] = []
 
     // Get all data from sheets
     const basePrompt = getSystemPrompt() || `あなたは親切なAI店員です。`;
-    const products = getProducts();
-    const faqs = getFaqs();
-    const services = getServices();
+    const allData = getAllSheetData();
 
-    // Construct Contexts
-    // Dynamically include all columns from each row for maximum flexibility
-    const formatRow = (row: Record<string, string>) => {
-        return Object.entries(row)
-            .filter(([, val]) => val !== "") // Skip empty values
-            .map(([key, val]) => `${key}: ${val}`)
-            .join(", ");
-    };
-
-    const productContext = products.slice(0, 500).map(p => `- ${formatRow(p)}`).join("\n");
-    const faqContext = faqs.map(f => `- ${formatRow(f)}`).join("\n");
-    const serviceContext = services.map(s => `- ${formatRow(s)}`).join("\n");
+    // Construct Contexts Dynamically
+    let dynamicContext = "";
+    
+    for (const [sheetName, rows] of allData.entries()) {
+        if (rows.length === 0) continue;
+        
+        dynamicContext += `\n### ${sheetName.toUpperCase()}\n`;
+        
+        // Limit context size per sheet if needed (e.g. first 100 rows)
+        const content = rows.slice(0, 100).map(row => {
+            return Object.entries(row)
+                .filter(([, val]) => val !== "")
+                .map(([key, val]) => `${key}: ${val}`)
+                .join(", ");
+        }).join("\n- ");
+        
+        dynamicContext += `- ${content}\n`;
+    }
 
     const systemInstruction = `
 ${basePrompt}
 
 以下の情報を元に、ユーザーの質問に回答してください。
 複数のカテゴリにまたがる質問には、それぞれの情報を組み合わせて回答してください。
-
-### よくある質問 (FAQ)
-${faqContext}
-
-### サービス紹介
-${serviceContext}
-
-### 商品リスト
-${productContext}
+${dynamicContext}
 `;
 
     try {

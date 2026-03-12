@@ -5,7 +5,7 @@ import cors from 'cors';
 import path from 'path';
 import { rateLimit } from 'express-rate-limit';
 import { config } from './config';
-import { fetchProducts, getProducts, fetchNews, getNews, fetchSystemPrompt, dataReadyPromise, fetchFaqs, fetchServices } from './services/sheets';
+import { fetchAllSheets, getAllSheetData, dataReadyPromise } from './services/sheets';
 import { generateResponseStream } from './services/gemini';
 import { getTTSService } from './services/tts/factory';
 import { TTSService } from './services/tts/types';
@@ -75,25 +75,19 @@ app.use('/public', express.static(path.join(__dirname, '../../dist/public')));
 // API Endpoints
 app.get('/api/books', async (req: Request, res: Response) => {
     await dataReadyPromise;
-    const products = getProducts();
-    res.json(products);
+    const data = getAllSheetData();
+    res.json(data.get('books') || []);
 });
 
 app.get('/api/news', async (req: Request, res: Response) => {
     await dataReadyPromise;
-    const news = getNews();
-    res.json(news);
+    const data = getAllSheetData();
+    res.json(data.get('news') || []);
 });
 
 // Initialize caching
-Promise.all([
-    fetchProducts(),
-    fetchNews(),
-    fetchSystemPrompt(),
-    fetchFaqs(),
-    fetchServices()
-]).then(() => {
-    console.log("Initial data fetch (all categories) complete.");
+fetchAllSheets().then(() => {
+    console.log("Initial data fetch (all sheets) complete.");
 });
 
 // WebSocket logic

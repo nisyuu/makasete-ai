@@ -3,34 +3,9 @@ import path from 'path';
 import { google, sheets_v4 } from 'googleapis';
 import { config } from '../config';
 
-export interface Product {
-    id: string;
-    title: string;
-    [key: string]: string;
-}
+export type SheetData = Record<string, string>;
 
-export interface News {
-    id: string;
-    title: string;
-    [key: string]: string;
-}
-
-export interface FAQ {
-    question: string;
-    answer: string;
-    [key: string]: string;
-}
-
-export interface Service {
-    title: string;
-    description: string;
-    [key: string]: string;
-}
-
-let productCache: Product[] | null = null;
-let newsCache: News[] | null = null;
-let faqCache: FAQ[] | null = null;
-let serviceCache: Service[] | null = null;
+let sheetCache: Map<string, SheetData[]> = new Map();
 let systemPromptCache: string | null = null;
 
 let resolveReady: () => void;
@@ -38,26 +13,15 @@ export const dataReadyPromise = new Promise<void>((resolve) => {
     resolveReady = resolve;
 });
 
-async function checkAllDataReady() {
-    if (productCache !== null && 
-        newsCache !== null && 
-        faqCache !== null && 
-        serviceCache !== null && 
-        systemPromptCache !== null) {
-        resolveReady();
-    }
-}
-
 /**
  * Maps spreadsheet rows to objects using the first row as keys.
  * Converts column names to snake_case for consistency.
  */
-function mapRowsToObjects<T>(header: string[], rows: string[][]): T[] {
+function mapRowsToObjects(header: string[], rows: string[][]): SheetData[] {
     return rows.map((row) => {
-        const obj: Record<string, string> = {};
+        const obj: SheetData = {};
         header.forEach((key, index) => {
             if (!key) return;
-            // Convert "Column Name" or "columnName" to "column_name"
             const safeKey = key
                 .trim()
                 .replace(/([a-z])([A-Z])/g, '$1_$2')
@@ -65,35 +29,27 @@ function mapRowsToObjects<T>(header: string[], rows: string[][]): T[] {
                 .replace(/\s+/g, '_');
             obj[safeKey] = row[index] || '';
         });
-        return obj as T;
+        return obj;
     });
 }
 
 async function getSheetsClient(): Promise<sheets_v4.Sheets> {
     const localKeyName = 'google-key.json';
     const absoluteKeyPath = path.join(process.cwd(), localKeyName);
-
     const scopes = ['https://www.googleapis.com/auth/spreadsheets.readonly'];
     
     let keyFile: string | undefined = undefined;
     if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
         keyFile = process.env.GOOGLE_APPLICATION_CREDENTIALS;
     } else if (fs.existsSync(absoluteKeyPath)) {
-        // Basic check to see if the file is readable and not empty
         try {
             const stats = fs.statSync(absoluteKeyPath);
             if (stats.size > 0) {
                 keyFile = absoluteKeyPath;
-            } else {
-                console.warn(`Local key file ${localKeyName} is empty.`);
             }
         } catch (e) {
             console.warn(`Could not read local key file ${localKeyName}:`, e);
         }
-    }
-
-    if (!keyFile && !process.env.K_SERVICE) { // Not on Cloud Run and no key file
-        console.warn("No valid authentication found (GOOGLE_APPLICATION_CREDENTIALS or google-key.json). Local Sheets API calls will likely fail.");
     }
 
     const auth = new google.auth.GoogleAuth({
@@ -104,184 +60,83 @@ async function getSheetsClient(): Promise<sheets_v4.Sheets> {
     return google.sheets({ version: 'v4', auth });
 }
 
-export async function fetchProducts(): Promise<Product[]> {
+/**
+ * Fetches all sheets and populates the cache.
+ * 'prompt' sheet is handled separately.
+ */
+export async function fetchAllSheets(): Promise<void> {
     if (!config.googleSheetsId) {
-        console.warn("GOOGLE_SHEETS_ID is not set. Returning empty product list.");
-        productCache = [];
-        checkAllDataReady();
-        return [];
+        console.warn("GOOGLE_SHEETS_ID is not set.");
+        resolveReady();
+        return;
     }
 
     try {
         const sheets = await getSheetsClient();
-        const response = await sheets.spreadsheets.values.get({
+        
+        // 1. Get spreadsheet metadata to list all sheet names
+        const spreadsheet = await sheets.spreadsheets.get({
             spreadsheetId: config.googleSheetsId,
-            range: 'books!A1:Z', // Fetch including header row
         });
 
-        const allValues = response.data.values;
-        if (!allValues || allValues.length < 1) {
-            productCache = [];
-        } else {
-            const [header, ...rows] = allValues;
-            productCache = mapRowsToObjects<Product>(header, rows);
-        }
+        const sheetNames = spreadsheet.data.sheets
+            ?.map(s => s.properties?.title)
+            .filter((name): name is string => !!name) || [];
 
-        checkAllDataReady();
-        return productCache;
-    } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        console.error("Error fetching products:", message);
-        productCache = [];
-        checkAllDataReady();
-        return [];
+        const newCache = new Map<string, SheetData[]>();
+
+        // 2. Fetch data for each sheet in parallel
+        await Promise.all(sheetNames.map(async (name) => {
+            try {
+                const response = await sheets.spreadsheets.values.get({
+                    spreadsheetId: config.googleSheetsId,
+                    range: `${name}!A1:Z`,
+                });
+
+                const allValues = response.data.values;
+                if (!allValues || allValues.length < 1) {
+                    if (name === 'prompt') systemPromptCache = "";
+                    else newCache.set(name, []);
+                    return;
+                }
+
+                if (name === 'prompt') {
+                    systemPromptCache = allValues[0][0] || "";
+                } else {
+                    const [header, ...rows] = allValues;
+                    newCache.set(name, mapRowsToObjects(header, rows));
+                }
+            } catch (err) {
+                console.error(`Error fetching sheet "${name}":`, err);
+                if (name === 'prompt') systemPromptCache = "";
+            }
+        }));
+
+        sheetCache = newCache;
+        if (systemPromptCache === null) systemPromptCache = "";
+        
+        resolveReady();
+    } catch (err) {
+        console.error("Error in fetchAllSheets:", err);
+        resolveReady(); // Ensure we don't block forever
     }
 }
 
-export async function fetchNews(): Promise<News[]> {
-    if (!config.googleSheetsId) {
-        console.warn("GOOGLE_SHEETS_ID is not set. Returning empty news list.");
-        newsCache = [];
-        checkAllDataReady();
-        return [];
-    }
-
-    try {
-        const sheets = await getSheetsClient();
-        const response = await sheets.spreadsheets.values.get({
-            spreadsheetId: config.googleSheetsId,
-            range: 'news!A1:Z',
-        });
-
-        const allValues = response.data.values;
-        if (!allValues || allValues.length < 1) {
-            newsCache = [];
-        } else {
-            const [header, ...rows] = allValues;
-            newsCache = mapRowsToObjects<News>(header, rows);
-        }
-
-        checkAllDataReady();
-        return newsCache;
-    } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        console.error("Error fetching news:", message);
-        newsCache = [];
-        checkAllDataReady();
-        return [];
-    }
-}
-
-export async function fetchSystemPrompt(): Promise<string> {
-    if (!config.googleSheetsId) {
-        console.warn("GOOGLE_SHEETS_ID is not set. Returning empty prompt.");
-        systemPromptCache = "";
-        checkAllDataReady();
-        return "";
-    }
-
-    try {
-        const sheets = await getSheetsClient();
-        const response = await sheets.spreadsheets.values.get({
-            spreadsheetId: config.googleSheetsId,
-            range: 'prompt!A1:A1',
-        });
-
-        const values = response.data.values;
-        if (!values || values.length === 0 || !values[0][0]) {
-            systemPromptCache = "";
-        } else {
-            systemPromptCache = values[0][0];
-        }
-        checkAllDataReady();
-        return systemPromptCache || "";
-    } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        console.error("Error fetching system prompt:", message);
-        systemPromptCache = "";
-        checkAllDataReady();
-        return "";
-    }
-}
-
-export async function fetchFaqs(): Promise<FAQ[]> {
-    if (!config.googleSheetsId) {
-        faqCache = [];
-        checkAllDataReady();
-        return [];
-    }
-
-    try {
-        const sheets = await getSheetsClient();
-        const response = await sheets.spreadsheets.values.get({
-            spreadsheetId: config.googleSheetsId,
-            range: 'faqs!A1:Z',
-        });
-
-        const allValues = response.data.values;
-        if (!allValues || allValues.length < 1) {
-            faqCache = [];
-        } else {
-            const [header, ...rows] = allValues;
-            faqCache = mapRowsToObjects<FAQ>(header, rows);
-        }
-        checkAllDataReady();
-        return faqCache;
-    } catch (err: unknown) {
-        console.error("Error fetching faqs:", err);
-        faqCache = [];
-        checkAllDataReady();
-        return [];
-    }
-}
-
-export async function fetchServices(): Promise<Service[]> {
-    if (!config.googleSheetsId) {
-        serviceCache = [];
-        checkAllDataReady();
-        return [];
-    }
-
-    try {
-        const sheets = await getSheetsClient();
-        const response = await sheets.spreadsheets.values.get({
-            spreadsheetId: config.googleSheetsId,
-            range: 'services!A1:Z',
-        });
-
-        const allValues = response.data.values;
-        if (!allValues || allValues.length < 1) {
-            serviceCache = [];
-        } else {
-            const [header, ...rows] = allValues;
-            serviceCache = mapRowsToObjects<Service>(header, rows);
-        }
-        checkAllDataReady();
-        return serviceCache;
-    } catch (err: unknown) {
-        console.error("Error fetching services:", err);
-        serviceCache = [];
-        checkAllDataReady();
-        return [];
-    }
-}
-
-export function getProducts(): Product[] {
-    return productCache || [];
-}
-
-export function getNews(): News[] {
-    return newsCache || [];
-}
-
-export function getFaqs(): FAQ[] {
-    return faqCache || [];
-}
-
-export function getServices(): Service[] {
-    return serviceCache || [];
+export function getAllSheetData(): Map<string, SheetData[]> {
+    return sheetCache;
 }
 
 export function getSystemPrompt(): string {
     return systemPromptCache || "";
 }
+
+// Remove old specific fetch functions
+export async function fetchProducts() { return []; }
+export async function fetchNews() { return []; }
+export async function fetchFaqs() { return []; }
+export async function fetchServices() { return []; }
+export async function fetchSystemPrompt() { return ""; }
+export function getProducts() { return []; }
+export function getNews() { return []; }
+export function getFaqs() { return []; }
+export function getServices() { return []; }
