@@ -18,11 +18,13 @@ export interface News {
 export interface FAQ {
     question: string;
     answer: string;
+    [key: string]: string;
 }
 
 export interface Service {
     title: string;
     description: string;
+    [key: string]: string;
 }
 
 let productCache: Product[] | null = null;
