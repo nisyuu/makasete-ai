@@ -32,17 +32,17 @@ export async function generateResponseStream(prompt: string, history: any[] = []
     const services = getServices();
 
     // Construct Contexts
-    const productContext = products.slice(0, 500).map(p =>
-        `- (ID: ${p.id}) ${p.title} (${p.category}, ¥${p.price}): ${p.description}`
-    ).join("\n");
+    // Dynamically include all columns from each row for maximum flexibility
+    const formatRow = (row: Record<string, string>) => {
+        return Object.entries(row)
+            .filter(([, val]) => val !== "") // Skip empty values
+            .map(([key, val]) => `${key}: ${val}`)
+            .join(", ");
+    };
 
-    const faqContext = faqs.map(f =>
-        `Q: ${f.question}\nA: ${f.answer}`
-    ).join("\n\n");
-
-    const serviceContext = services.map(s =>
-        `- ${s.title}: ${s.description}`
-    ).join("\n");
+    const productContext = products.slice(0, 500).map(p => `- ${formatRow(p)}`).join("\n");
+    const faqContext = faqs.map(f => `- ${formatRow(f)}`).join("\n");
+    const serviceContext = services.map(s => `- ${formatRow(s)}`).join("\n");
 
     const systemInstruction = `
 ${basePrompt}

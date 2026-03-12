@@ -71,6 +71,21 @@ ECサイトの `</body>` タグの直前に以下のスクリプトを追加し�
 <script src="https://[YOUR_CLOUD_RUN_URL]/public/widget.js"></script>
 ```
 
+## スプレッドシートの構成
+
+本システムは、指定された `GOOGLE_SHEETS_ID` のスプレッドシートから以下のシートを参照します。各シートの1行目はヘッダーとして扱われます。**カラム名や数は自由に追加・変更が可能**です（AIが自動的に読み込みます）。
+
+| シート名 | 役割 | 構成例（1行目） |
+| :--- | :--- | :--- |
+| `prompt` | AIの性格・接客ルール | (カラム定義なし。A1セルにプロンプト全文を記載) |
+| `books` | 商品リスト | `id`, `title`, `category`, `price`, `description` など |
+| `faqs` | よくある質問 | `question`, `answer`, `category` など |
+| `services` | サービス紹介 | `title`, `description`, `price_range` など |
+| `news` | お知らせ | `id`, `title`, `date` など |
+
+※ シートが存在しない場合は、そのカテゴリの情報がないものとして処理されます。
+※ カラム名をスペースありで作成した場合（例：`Product Name`）、内部的にスネークケース（`product_name`）に変換されます。
+
 ## デプロイ (Google Cloud Run)
 
 Terraformを使用してデプロイします。
