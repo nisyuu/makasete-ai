@@ -78,10 +78,11 @@ resource "google_project_iam_member" "scheduler_workflow_invoker" {
   member  = "serviceAccount:${google_service_account.scheduler_sa.email}"
 }
 
-# 4. 09:00 START (min=1)
+# 4. 09:00 START (min=1) for each bot
 resource "google_cloud_scheduler_job" "start_job" {
-  name             = "start-bot-instances"
-  description      = "Set min-instances to 1 at 9 AM JST"
+  for_each         = var.bots
+  name             = "start-bot-${each.key}"
+  description      = "Set min-instances to 1 at 9 AM JST for ${each.key}"
   schedule         = "0 9 * * *"
   time_zone        = "Asia/Tokyo"
   region           = var.region
@@ -92,7 +93,7 @@ resource "google_cloud_scheduler_job" "start_job" {
     body        = base64encode(jsonencode({
       argument = jsonencode({
         min_instances = "1"
-        service_name  = var.service_name
+        service_name  = google_cloud_run_service.bots[each.key].name
         location      = var.region
       })
     }))
@@ -102,10 +103,11 @@ resource "google_cloud_scheduler_job" "start_job" {
   }
 }
 
-# 5. 21:00 STOP (min=0)
+# 5. 21:00 STOP (min=0) for each bot
 resource "google_cloud_scheduler_job" "stop_job" {
-  name             = "stop-bot-instances"
-  description      = "Set min-instances to 0 at 9 PM JST"
+  for_each         = var.bots
+  name             = "stop-bot-${each.key}"
+  description      = "Set min-instances to 0 at 9 PM JST for ${each.key}"
   schedule         = "0 21 * * *"
   time_zone        = "Asia/Tokyo"
   region           = var.region
@@ -116,7 +118,7 @@ resource "google_cloud_scheduler_job" "stop_job" {
     body        = base64encode(jsonencode({
       argument = jsonencode({
         min_instances = "0"
-        service_name  = var.service_name
+        service_name  = google_cloud_run_service.bots[each.key].name
         location      = var.region
       })
     }))
