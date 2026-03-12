@@ -20,7 +20,7 @@ import { ChatWidget } from './widget';
     container.innerHTML = `
         <div class="chat-window">
              <div class="chat-header">
-                <span>AI書店員 福蔵</span>
+                <span>AI店員</span>
                 <div class="header-controls">
                     <button class="audio-toggle-btn" title="音声読み上げOFF">
                         <span class="audio-icon">🔇</span>
@@ -44,7 +44,7 @@ import { ChatWidget } from './widget';
              </div>
         </div>
         <button class="launcher-button">
-            <span>福蔵に聞いてみる</span>
+            <span>AI店員に聞いてみる</span>
         </button>
     `;
     shadow.appendChild(container);

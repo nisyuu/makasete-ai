@@ -171,10 +171,13 @@ async function processSentence(socket: Socket, sentence: string, isVoiceInput: b
         socket.emit('audio-chunk', { type: 'text', content: sentence });
 
         try {
-            // Cleanup: remove links, emojis, and extra symbols for cleaner TTS
+            // Cleanup: remove links, URLs, emojis, and extra symbols for cleaner TTS
             const cleanSentence = removeMarkdownLinks(sentence)
+                .replace(/(^|\s)\/[a-zA-Z0-9][-a-zA-Z0-9/._+&@#%=~]*(\b|$)/g, '$1') // Remove relative paths like /books/1 but keep dates like 2024/03/12
+                .replace(/https?:\/\/\S+/g, '') // Remove full HTTP/HTTPS URLs
                 .replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '') // Remove Emojis
                 .replace(/[＊*#]/g, '') // Remove common markdown symbols
+                .replace(/\s+/g, ' ') // Collapse extra spaces
                 .trim();
 
             if (!cleanSentence) return; // Skip if nothing to read
@@ -214,5 +217,11 @@ httpServer.listen(PORT, () => {
 });
 
 function removeMarkdownLinks(text: string): string {
-    return text.replace(/\[((?:[^[\]]|\[[^\]]*\])+)\]\(([^)]+)\)/g, '$1');
+    // 1. Standard markdown links [text](url) -> text
+    let clean = text.replace(/\[((?:[^[\]]|\[[^\]]*\])+)\]\(([^)]+)\)/g, '$1');
+    
+    // 2. Handle cases where there might be a space between ] and ( by mistake
+    clean = clean.replace(/\[((?:[^[\]]|\[[^\]]*\])+)\]\s+\(([^)]+)\)/g, '$1');
+
+    return clean;
 } 

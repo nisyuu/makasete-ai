@@ -52,7 +52,7 @@ export class ChatWidget {
         this.updateAudioToggleUI();
         this.waitForData();
         
-        this.appendMessage('bot', 'いらっしゃいませ。AI書店員の福蔵です。何かお探しの本はございますか？');
+        this.appendMessage('bot', 'いらっしゃいませ。AI店員です。何かお手伝いできることはありますか？');
     }
 
     private async waitForData() {

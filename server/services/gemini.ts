@@ -26,7 +26,7 @@ export async function generateResponseStream(prompt: string, history: any[] = []
     }
 
     // Get all data from sheets
-    const basePrompt = getSystemPrompt() || `あなたは親切なAI店員です。名前は福蔵です。`;
+    const basePrompt = getSystemPrompt() || `あなたは親切なAI店員です。`;
     const products = getProducts();
     const faqs = getFaqs();
     const services = getServices();
