@@ -16,7 +16,7 @@ Google GeminiとElevenLabsを活用した、ECサイト向け音声対話チャ�
 ### フロントエンド (Widget)
 - **技術スタック**: Vanilla TypeScript, Web Components (Shadow DOM), CSS, Vite
 - **音声認識**: Web Speech API を使用。
-- **音声再生**: MediaSource API (fMP4/AAC) を使用。全てのブラウザ（Safari含む）で高品質なストリーミング再生を実現。
+- **音声再生**: MP3 Blobの逐次再生方式を使用。全ブラウザ（Safari含む）で安定したストリーミング再生を実現。
 - **通信**: Socket.io を使用した双方向通信。
 
 ### バックエンド (Server)
