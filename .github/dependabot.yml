@@ -3,17 +3,20 @@ updates:
   # Maintain dependencies for GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
+    target-branch: "develop"
     schedule:
       interval: "weekly"
 
   # Maintain dependencies for Node.js (pnpm)
   - package-ecosystem: "npm"
     directory: "/"
+    target-branch: "develop"
     schedule:
       interval: "weekly"
 
   # Maintain dependencies for Terraform
   - package-ecosystem: "terraform"
     directory: "/terraform"
+    target-branch: "develop"
     schedule:
       interval: "weekly"
