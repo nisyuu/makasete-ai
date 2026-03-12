@@ -73,16 +73,23 @@ app.use(express.json());
 app.use('/public', express.static(path.join(__dirname, '../../dist/public')));
 
 // API Endpoints
-app.get('/api/books', async (req: Request, res: Response) => {
+app.get('/api/:sheetName', async (req: Request, res: Response) => {
     await dataReadyPromise;
-    const data = getAllSheetData();
-    res.json(data.get('books') || []);
-});
+    const { sheetName } = req.params;
 
-app.get('/api/news', async (req: Request, res: Response) => {
-    await dataReadyPromise;
+    // Security: Do not expose the prompt sheet via API
+    if (sheetName === 'prompt') {
+        return res.status(404).json({ error: "Sheet 'prompt' not found" });
+    }
+
     const data = getAllSheetData();
-    res.json(data.get('news') || []);
+    const sheetData = data.get(sheetName);
+
+    if (sheetData) {
+        res.json(sheetData);
+    } else {
+        res.status(404).json({ error: `Sheet '${sheetName}' not found` });
+    }
 });
 
 // Initialize caching
