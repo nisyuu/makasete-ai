@@ -15,8 +15,20 @@ export interface News {
     [key: string]: string;
 }
 
+export interface FAQ {
+    question: string;
+    answer: string;
+}
+
+export interface Service {
+    title: string;
+    description: string;
+}
+
 let productCache: Product[] | null = null;
 let newsCache: News[] | null = null;
+let faqCache: FAQ[] | null = null;
+let serviceCache: Service[] | null = null;
 let systemPromptCache: string | null = null;
 
 let resolveReady: () => void;
@@ -25,7 +37,11 @@ export const dataReadyPromise = new Promise<void>((resolve) => {
 });
 
 async function checkAllDataReady() {
-    if (productCache !== null && newsCache !== null && systemPromptCache !== null) {
+    if (productCache !== null && 
+        newsCache !== null && 
+        faqCache !== null && 
+        serviceCache !== null && 
+        systemPromptCache !== null) {
         resolveReady();
     }
 }
@@ -186,12 +202,82 @@ export async function fetchSystemPrompt(): Promise<string> {
     }
 }
 
+export async function fetchFaqs(): Promise<FAQ[]> {
+    if (!config.googleSheetsId) {
+        faqCache = [];
+        checkAllDataReady();
+        return [];
+    }
+
+    try {
+        const sheets = await getSheetsClient();
+        const response = await sheets.spreadsheets.values.get({
+            spreadsheetId: config.googleSheetsId,
+            range: 'faqs!A1:Z',
+        });
+
+        const allValues = response.data.values;
+        if (!allValues || allValues.length < 1) {
+            faqCache = [];
+        } else {
+            const [header, ...rows] = allValues;
+            faqCache = mapRowsToObjects<FAQ>(header, rows);
+        }
+        checkAllDataReady();
+        return faqCache;
+    } catch (err: unknown) {
+        console.error("Error fetching faqs:", err);
+        faqCache = [];
+        checkAllDataReady();
+        return [];
+    }
+}
+
+export async function fetchServices(): Promise<Service[]> {
+    if (!config.googleSheetsId) {
+        serviceCache = [];
+        checkAllDataReady();
+        return [];
+    }
+
+    try {
+        const sheets = await getSheetsClient();
+        const response = await sheets.spreadsheets.values.get({
+            spreadsheetId: config.googleSheetsId,
+            range: 'services!A1:Z',
+        });
+
+        const allValues = response.data.values;
+        if (!allValues || allValues.length < 1) {
+            serviceCache = [];
+        } else {
+            const [header, ...rows] = allValues;
+            serviceCache = mapRowsToObjects<Service>(header, rows);
+        }
+        checkAllDataReady();
+        return serviceCache;
+    } catch (err: unknown) {
+        console.error("Error fetching services:", err);
+        serviceCache = [];
+        checkAllDataReady();
+        return [];
+    }
+}
+
 export function getProducts(): Product[] {
     return productCache || [];
 }
 
 export function getNews(): News[] {
     return newsCache || [];
+}
+
+export function getFaqs(): FAQ[] {
+    return faqCache || [];
+}
+
+export function getServices(): Service[] {
+    return serviceCache || [];
 }
 
 export function getSystemPrompt(): string {

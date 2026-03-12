@@ -10,7 +10,6 @@ export class ChatWidget {
     private audioQueue: Blob[] = [];
     private isPlaying = false;
     private audio: AudioWithTimeout;
-    private isIOS = false;
 
     // UI Elements
     private chatWindow: HTMLElement;
@@ -24,7 +23,7 @@ export class ChatWidget {
 
     // State
     private isRecording = false;
-    private isAudioEnabled = false;
+    private isAudioEnabled = true;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     private recognition: any = null;
     private serverUrl: string;
@@ -44,11 +43,6 @@ export class ChatWidget {
         this.audioToggleBtn = this.shadowRoot.querySelector('.audio-toggle-btn') as HTMLButtonElement;
         this.loadingOverlay = this.shadowRoot.querySelector('.loading-overlay') as HTMLElement;
 
-        // Detect device
-        const ua = navigator.userAgent;
-        this.isIOS = /iPhone|iPad|iPod/i.test(ua) || 
-                     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-        
         this.audio = new Audio();
         this.audio.addEventListener('ended', () => this.onAudioEnded());
         
@@ -195,8 +189,7 @@ export class ChatWidget {
 
         this.socket.emit('user-input', {
             text,
-            isVoiceInput: useAudio,
-            isIOS: this.isIOS
+            isVoiceInput: useAudio
         });
     }
 

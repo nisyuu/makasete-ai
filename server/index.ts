@@ -5,9 +5,10 @@ import cors from 'cors';
 import path from 'path';
 import { rateLimit } from 'express-rate-limit';
 import { config } from './config';
-import { fetchProducts, getProducts, fetchNews, getNews, fetchSystemPrompt, dataReadyPromise } from './services/sheets';
+import { fetchProducts, getProducts, fetchNews, getNews, fetchSystemPrompt, dataReadyPromise, fetchFaqs, fetchServices } from './services/sheets';
 import { generateResponseStream } from './services/gemini';
 import { getTTSService } from './services/tts/factory';
+import { TTSService } from './services/tts/types';
 import { StreamBuffer } from './utils/streamBuffer';
 
 const app = express();
@@ -85,8 +86,14 @@ app.get('/api/news', async (req: Request, res: Response) => {
 });
 
 // Initialize caching
-Promise.all([fetchProducts(), fetchNews(), fetchSystemPrompt()]).then(() => {
-    console.log("Initial data fetch (books, news & prompt) complete.");
+Promise.all([
+    fetchProducts(),
+    fetchNews(),
+    fetchSystemPrompt(),
+    fetchFaqs(),
+    fetchServices()
+]).then(() => {
+    console.log("Initial data fetch (all categories) complete.");
 });
 
 // WebSocket logic
@@ -94,7 +101,7 @@ io.on('connection', (socket) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chatHistory: any[] = [];
 
-    socket.on('user-input', async (data: { text: string; isVoiceInput: boolean; isIOS?: boolean }) => {
+    socket.on('user-input', async (data: { text: string; isVoiceInput: boolean }) => {
         const { text, isVoiceInput } = data;
         
         if (!text || typeof text !== 'string' || text.length > 1000) {
@@ -113,6 +120,7 @@ io.on('connection', (socket) => {
         try {
             // 1. Get Gemini Stream
             const stream = await generateResponseStream(text, chatHistory);
+            const ttsService = getTTSService();
 
             let fullResponseText = "";
 
@@ -124,14 +132,14 @@ io.on('connection', (socket) => {
                 const sentences = streamBuffer.add(chunkText);
 
                 for (const sentence of sentences) {
-                    await processSentence(socket, sentence, isVoiceInput);
+                    await processSentence(socket, sentence, isVoiceInput, ttsService);
                 }
             }
 
             // Flush remaining buffer
             const remaining = streamBuffer.flush();
             if (remaining) {
-                await processSentence(socket, remaining, isVoiceInput);
+                await processSentence(socket, remaining, isVoiceInput, ttsService);
             }
 
             // Add model response to history
@@ -158,7 +166,7 @@ io.on('connection', (socket) => {
     });
 });
 
-async function processSentence(socket: Socket, sentence: string, isVoiceInput: boolean) {
+async function processSentence(socket: Socket, sentence: string, isVoiceInput: boolean, ttsService: TTSService) {
     if (isVoiceInput) {
         socket.emit('audio-chunk', { type: 'text', content: sentence });
 
@@ -171,7 +179,6 @@ async function processSentence(socket: Socket, sentence: string, isVoiceInput: b
 
             if (!cleanSentence) return; // Skip if nothing to read
 
-            const ttsService = getTTSService();
             const audioStream: NodeJS.ReadableStream = await ttsService.generateSpeechStream(cleanSentence);
 
             const chunks: Buffer[] = [];

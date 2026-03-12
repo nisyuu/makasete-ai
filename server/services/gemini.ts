@@ -1,6 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { config } from "../config";
-import { getProducts, getSystemPrompt } from "./sheets";
+import { getProducts, getSystemPrompt, getFaqs, getServices } from "./sheets";
 
 let genAI: GoogleGenerativeAI;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -25,28 +25,38 @@ export async function generateResponseStream(prompt: string, history: any[] = []
         initGemini();
     }
 
-    // Get base prompt from sheet
-    const basePrompt = getSystemPrompt() || `あなたはECサイトの親切なAI書店員です。名前は福蔵です。`;
-
-    // Construct Product Context
+    // Get all data from sheets
+    const basePrompt = getSystemPrompt() || `あなたは親切なAI店員です。名前は福蔵です。`;
     const products = getProducts();
+    const faqs = getFaqs();
+    const services = getServices();
+
+    // Construct Contexts
     const productContext = products.slice(0, 500).map(p =>
         `- (ID: ${p.id}) ${p.title} (${p.category}, ¥${p.price}): ${p.description}`
+    ).join("\n");
+
+    const faqContext = faqs.map(f =>
+        `Q: ${f.question}\nA: ${f.answer}`
+    ).join("\n\n");
+
+    const serviceContext = services.map(s =>
+        `- ${s.title}: ${s.description}`
     ).join("\n");
 
     const systemInstruction = `
 ${basePrompt}
 
-以下の商品リストにある情報を元に、商品をおすすめしたり、質問に答えてください。
-おすすめする商品は3つまでにしてください。
-リストにない情報は「申し訳ありません、その情報についてはわかりかねます」と答えてください。
-回答は、音声合成で読み上げられることを想定して、以下の点に注意してください：
-1. 長すぎない、自然な話し言葉（です・ます調）を使う。
-2. URLそのものの読み上げや、記号的な表現は避ける。
-3. 感情を込めたような表現（！など）は適度に使用可。
-4. 商品をおすすめする際は、必ず「[商品名](/books/商品ID)」という形式でリンクを作成してください。
+以下の情報を元に、ユーザーの質問に回答してください。
+複数のカテゴリにまたがる質問には、それぞれの情報を組み合わせて回答してください。
 
-商品リスト:
+### よくある質問 (FAQ)
+${faqContext}
+
+### サービス紹介
+${serviceContext}
+
+### 商品リスト
 ${productContext}
 `;
 
@@ -59,7 +69,7 @@ ${productContext}
                 },
                 {
                     role: "model",
-                    parts: [{ text: "かしこまりました。商品リストを把握しました。接客を開始します。" }]
+                    parts: [{ text: "承知いたしました。提供された情報を把握しました。接客を開始します。" }]
                 },
                 ...history
             ]

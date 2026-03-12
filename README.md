@@ -1,13 +1,13 @@
 # Makasete Bot
 
-Google GeminiとElevenLabsを活用した、ECサイト向け音声対話チャットボットウィジェット。
+Google Geminiを活用した、ECサイト・サービスサイト向け音声対話チャットボットウィジェット。
 
 ## 特徴
-- **リアルタイム音声対話**: ユーザーの音声を認識し、AIが人間のように自然な音声で応答します。
+- **リアルタイム音声対話**: ユーザーの音声を認識し、AIが自然な音声で応答します。
 - **低遅延ストリーミング**: Geminiの回答を句読点ごとに分割して音声合成。ユーザーを待たせない高速なレスポンス。
-- **動的プロンプト管理**: スプレッドシートの `prompt` シートを書き換えるだけで、AIの性格や接客スタイルを即座に変更可能。
-- **商品提案**: スプレッドシートの商品データを参照し、最新の在庫状況や詳細情報を元に提案を行います。
-- **コスト最適化**: Cloud SchedulerとWorkflowにより、夜間などの不要な時間帯はインスタンスを自動停止。
+- **動的コンテキスト管理**: スプレッドシートを書き換えるだけで、AIの性格（プロンプト）、商品データ、よくある質問 (FAQ)、サービス紹介を即座に変更可能。
+- **マルチデバイス対応**: PCおよびスマートフォン（iOS/Android）の主要ブラウザで動作。
+- **コスト最適化**: Cloud Schedulerにより、夜間などの不要な時間帯はインスタンスを自動停止。
 
 ## 仕組み
 
@@ -16,23 +16,22 @@ Google GeminiとElevenLabsを活用した、ECサイト向け音声対話チャ�
 ### フロントエンド (Widget)
 - **技術スタック**: Vanilla TypeScript, Web Components (Shadow DOM), CSS, Vite
 - **音声認識**: Web Speech API を使用。
-- **音声再生**: MP3 Blobの逐次再生方式を使用。全ブラウザ（Safari含む）で安定したストリーミング再生を実現。
+- **音声再生**: MP3 Blobの逐次再生方式を使用。
 - **通信**: Socket.io を使用した双方向通信。
 
 ### バックエンド (Server)
 - **技術スタック**: Node.js (v24), Express, Socket.io
 - **AI処理**:
     - **LLM**: Google Gemini API (gemini-2.5-flash)
-    - **TTS**: ElevenLabs API (高品質な日本語音声)
-- **データ連携**: Google Sheets API (商品情報・システムプロンプトの取得)
+    - **TTS**: Google Cloud Text-to-Speech (デフォルト) または ElevenLabs API
+- **データ連携**: Google Sheets API (商品情報・FAQ・サービス紹介・システムプロンプトの取得)
 
 ## 開発環境セットアップ
 
 ### 前提条件
 - Node.js (v24+)
 - pnpm (v10+)
-- Google Cloud プロジェクト (Cloud Run, Secret Manager, etc.)
-- ElevenLabs アカウント
+- Google Cloud プロジェクト (Cloud Run, Secret Manager, Text-to-Speech API, etc.)
 
 ### インストール
 ```bash
@@ -44,10 +43,13 @@ pnpm install
 ```env
 GOOGLE_SHEETS_ID=your_sheet_id
 GEMINI_API_KEY=your_gemini_key
-ELEVENLABS_API_KEY=your_elevenlabs_key
 ALLOWED_ORIGINS=http://localhost:3000,https://your-site.com
+# オプション
+TTS_PROVIDER=gemini # (default) or elevenlabs
+ELEVENLABS_API_KEY=your_elevenlabs_key # elevenlabs使用時のみ
 ```
-2. ローカル開発用のサービスアカウントキーを `google-key.json` としてルートに配置します。
+2. サービスアカウントキー（Google Sheets/TTS用）を `google-key.json` としてルートに配置します。
+
 
 ### 起動
 ```bash
@@ -83,6 +85,22 @@ Terraformを使用してデプロイします。
    terraform init
    terraform apply
    ```
+
+## スプレッドシート連携 (GAS)
+
+`gas/` ディレクトリには、Google スプレッドシートから直接サーバーの再構築（デプロイ）を実行するためのスクリプトが含まれています。これにより、プロンプトや商品データを更新した後に、エンジニアでなくてもワンクリックで最新の状態を反映させることが可能です。
+
+### セットアップ
+1. 対象のスプレッドシートのメニューから **[拡張機能] > [Apps Script]** を開きます。
+2. `gas/main.js` の内容をエディタにコピー＆ペーストします。
+3. スクリプト内の以下の変数を、自身の環境に合わせて書き換えます：
+   - `PROJECT_ID`: Google Cloud のプロジェクトID
+   - `TRIGGER_NAME`: Cloud Build のトリガー名（例: `redeploy-makasete-bot`）
+4. 保存してスプレッドシートをリロードすると、メニューに **[🤖 Makasete Bot]** が追加されます。
+
+### 使い方
+- スプレッドシートでプロンプトや商品リストを編集した後、**[🤖 Makasete Bot] > [🚀 サーバーを再構築 (デプロイ)]** をクリックします。
+- Cloud Build のトリガーが実行され、最新のソースコードとスプレッドシート情報でサーバーが自動的に再デプロイされます。
 
 ### 自動スケール
 `terraform/scheduler.tf` により、毎日 09:00 (JST) に起動し、21:00 (JST) に自動停止するスケジュールが設定されます。

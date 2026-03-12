@@ -3,12 +3,18 @@ import { TTSService } from './types';
 import { ElevenLabsTTSService } from './elevenlabs';
 import { GeminiTTSService } from './google';
 
+let cachedService: TTSService | null = null;
+
 export function getTTSService(): TTSService {
+    if (cachedService) return cachedService;
+
     const provider = config.ttsProvider;
     
     if (provider === 'elevenlabs') {
-        return new ElevenLabsTTSService();
+        cachedService = new ElevenLabsTTSService();
+    } else {
+        cachedService = new GeminiTTSService();
     }
     
-    return new GeminiTTSService();
+    return cachedService;
 }
