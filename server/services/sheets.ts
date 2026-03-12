@@ -129,14 +129,3 @@ export function getAllSheetData(): Map<string, SheetData[]> {
 export function getSystemPrompt(): string {
     return systemPromptCache || "";
 }
-
-// Remove old specific fetch functions
-export async function fetchProducts() { return []; }
-export async function fetchNews() { return []; }
-export async function fetchFaqs() { return []; }
-export async function fetchServices() { return []; }
-export async function fetchSystemPrompt() { return ""; }
-export function getProducts() { return []; }
-export function getNews() { return []; }
-export function getFaqs() { return []; }
-export function getServices() { return []; }

@@ -72,6 +72,11 @@ app.use(express.json());
 // Static files (Widget)
 app.use('/public', express.static(path.join(__dirname, '../../dist/public')));
 
+app.get('/health', async (req: Request, res: Response) => {
+    await dataReadyPromise;
+    res.json({ status: "ready" });
+});
+
 // API Endpoints
 app.get('/api/:sheetName', async (req: Request, res: Response) => {
     await dataReadyPromise;

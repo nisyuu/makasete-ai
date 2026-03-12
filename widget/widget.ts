@@ -58,7 +58,7 @@ export class ChatWidget {
     private async waitForData() {
         try {
             // This endpoint now blocks until data is fetched from Sheets on the server
-            const response = await fetch(`${this.serverUrl}/api/books`);
+            const response = await fetch(`${this.serverUrl}/health`);
             if (response.ok) {
                 this.loadingOverlay.classList.add('hidden');
             } else {
