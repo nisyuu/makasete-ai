@@ -38,6 +38,10 @@ import { ChatWidget } from './widget';
                  </div>
                  <button class="btn send-btn" title="送信">➤</button>
              </div>
+             <div class="loading-overlay">
+                <div class="spinner"></div>
+                <div class="loading-text">準備中です。少々お待ちください...</div>
+             </div>
         </div>
         <button class="launcher-button">
             <span>福蔵に聞いてみる</span>

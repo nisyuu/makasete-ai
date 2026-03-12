@@ -15,9 +15,20 @@ export interface News {
     [key: string]: string;
 }
 
-let productCache: Product[] = [];
-let newsCache: News[] = [];
-let systemPromptCache: string = "";
+let productCache: Product[] | null = null;
+let newsCache: News[] | null = null;
+let systemPromptCache: string | null = null;
+
+let resolveReady: () => void;
+export const dataReadyPromise = new Promise<void>((resolve) => {
+    resolveReady = resolve;
+});
+
+async function checkAllDataReady() {
+    if (productCache !== null && newsCache !== null && systemPromptCache !== null) {
+        resolveReady();
+    }
+}
 
 /**
  * Maps spreadsheet rows to objects using the first row as keys.
@@ -78,6 +89,8 @@ async function getSheetsClient(): Promise<sheets_v4.Sheets> {
 export async function fetchProducts(): Promise<Product[]> {
     if (!config.googleSheetsId) {
         console.warn("GOOGLE_SHEETS_ID is not set. Returning empty product list.");
+        productCache = [];
+        checkAllDataReady();
         return [];
     }
 
@@ -90,16 +103,19 @@ export async function fetchProducts(): Promise<Product[]> {
 
         const allValues = response.data.values;
         if (!allValues || allValues.length < 1) {
-            return [];
+            productCache = [];
+        } else {
+            const [header, ...rows] = allValues;
+            productCache = mapRowsToObjects<Product>(header, rows);
         }
 
-        const [header, ...rows] = allValues;
-        productCache = mapRowsToObjects<Product>(header, rows);
-
+        checkAllDataReady();
         return productCache;
     } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         console.error("Error fetching products:", message);
+        productCache = [];
+        checkAllDataReady();
         return [];
     }
 }
@@ -107,6 +123,8 @@ export async function fetchProducts(): Promise<Product[]> {
 export async function fetchNews(): Promise<News[]> {
     if (!config.googleSheetsId) {
         console.warn("GOOGLE_SHEETS_ID is not set. Returning empty news list.");
+        newsCache = [];
+        checkAllDataReady();
         return [];
     }
 
@@ -119,16 +137,19 @@ export async function fetchNews(): Promise<News[]> {
 
         const allValues = response.data.values;
         if (!allValues || allValues.length < 1) {
-            return [];
+            newsCache = [];
+        } else {
+            const [header, ...rows] = allValues;
+            newsCache = mapRowsToObjects<News>(header, rows);
         }
 
-        const [header, ...rows] = allValues;
-        newsCache = mapRowsToObjects<News>(header, rows);
-
+        checkAllDataReady();
         return newsCache;
     } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         console.error("Error fetching news:", message);
+        newsCache = [];
+        checkAllDataReady();
         return [];
     }
 }
@@ -136,6 +157,8 @@ export async function fetchNews(): Promise<News[]> {
 export async function fetchSystemPrompt(): Promise<string> {
     if (!config.googleSheetsId) {
         console.warn("GOOGLE_SHEETS_ID is not set. Returning empty prompt.");
+        systemPromptCache = "";
+        checkAllDataReady();
         return "";
     }
 
@@ -148,26 +171,29 @@ export async function fetchSystemPrompt(): Promise<string> {
 
         const values = response.data.values;
         if (!values || values.length === 0 || !values[0][0]) {
-            return "";
+            systemPromptCache = "";
+        } else {
+            systemPromptCache = values[0][0];
         }
-
-        systemPromptCache = values[0][0];
+        checkAllDataReady();
         return systemPromptCache;
     } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         console.error("Error fetching system prompt:", message);
+        systemPromptCache = "";
+        checkAllDataReady();
         return "";
     }
 }
 
 export function getProducts(): Product[] {
-    return productCache;
+    return productCache || [];
 }
 
 export function getNews(): News[] {
-    return newsCache;
+    return newsCache || [];
 }
 
 export function getSystemPrompt(): string {
-    return systemPromptCache;
+    return systemPromptCache || "";
 }

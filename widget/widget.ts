@@ -20,15 +20,18 @@ export class ChatWidget {
     private micBtn: HTMLButtonElement;
     private launcherBtn: HTMLButtonElement;
     private audioToggleBtn: HTMLButtonElement;
+    private loadingOverlay: HTMLElement;
 
     // State
     private isRecording = false;
     private isAudioEnabled = false;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     private recognition: any = null;
+    private serverUrl: string;
 
     constructor(shadowRoot: ShadowRoot, serverUrl: string) {
         this.shadowRoot = shadowRoot;
+        this.serverUrl = serverUrl;
         this.socket = io(serverUrl);
 
         // Element binding
@@ -39,6 +42,7 @@ export class ChatWidget {
         this.micBtn = this.shadowRoot.querySelector('.mic-btn') as HTMLButtonElement;
         this.launcherBtn = this.shadowRoot.querySelector('.launcher-button') as HTMLButtonElement;
         this.audioToggleBtn = this.shadowRoot.querySelector('.audio-toggle-btn') as HTMLButtonElement;
+        this.loadingOverlay = this.shadowRoot.querySelector('.loading-overlay') as HTMLElement;
 
         // Detect device
         const ua = navigator.userAgent;
@@ -52,8 +56,24 @@ export class ChatWidget {
         this.bindEvents();
         this.initSpeechRecognition();
         this.updateAudioToggleUI();
+        this.waitForData();
         
         this.appendMessage('bot', 'いらっしゃいませ。AI書店員の福蔵です。何かお探しの本はございますか？');
+    }
+
+    private async waitForData() {
+        try {
+            // This endpoint now blocks until data is fetched from Sheets on the server
+            const response = await fetch(`${this.serverUrl}/api/books`);
+            if (response.ok) {
+                this.loadingOverlay.classList.add('hidden');
+            } else {
+                console.warn("[MakaseteBot] Failed to verify data readiness");
+                // Optional: show error in overlay
+            }
+        } catch (e) {
+            console.error("[MakaseteBot] Error waiting for data:", e);
+        }
     }
 
     private initSocket() {

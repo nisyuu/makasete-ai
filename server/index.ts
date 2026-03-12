@@ -5,7 +5,7 @@ import cors from 'cors';
 import path from 'path';
 import { rateLimit } from 'express-rate-limit';
 import { config } from './config';
-import { fetchProducts, getProducts, fetchNews, getNews, fetchSystemPrompt } from './services/sheets';
+import { fetchProducts, getProducts, fetchNews, getNews, fetchSystemPrompt, dataReadyPromise } from './services/sheets';
 import { generateResponseStream } from './services/gemini';
 import { getTTSService } from './services/tts/factory';
 import { StreamBuffer } from './utils/streamBuffer';
@@ -72,12 +72,14 @@ app.use(express.json());
 app.use('/public', express.static(path.join(__dirname, '../../dist/public')));
 
 // API Endpoints
-app.get('/api/books', (req: Request, res: Response) => {
+app.get('/api/books', async (req: Request, res: Response) => {
+    await dataReadyPromise;
     const products = getProducts();
     res.json(products);
 });
 
-app.get('/api/news', (req: Request, res: Response) => {
+app.get('/api/news', async (req: Request, res: Response) => {
+    await dataReadyPromise;
     const news = getNews();
     res.json(news);
 });
