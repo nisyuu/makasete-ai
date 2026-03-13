@@ -102,18 +102,38 @@ ECサイトの `</body>` タグの直前に以下のスクリプトを追加し�
 
 ## デプロイ (Google Cloud Run)
 
-Terraformを使用してデプロイします。
+Terraformを使用してデプロイします。本システムは、複数のスプレッドシート（ボット）を同時にホストすることが可能です。
 
 1. **Dockerイメージのビルドとプッシュ**:
    ```bash
    gcloud builds submit --tag asia-northeast1-docker.pkg.dev/[PROJECT_ID]/makasete-bot-repo/makasete-bot:latest
    ```
-2. **Terraformの適用**:
+2. **環境設定 (`terraform/terraform.tfvars`)**:
+   `terraform/terraform.tfvars.example` を参考に、ボットの設定（スプレッドシートIDやAPIキー）を記述します。
+   ```hcl
+   project_id = "your-project-id"
+   container_image = "asia-northeast1-docker.pkg.dev/..."
+   
+   bots = {
+     "shop-a" = {
+       google_sheets_id = "spreadsheet-id-for-a"
+       gemini_api_key = "api-key-for-a"
+       elevenlabs_api_key = "tts-key-for-a"
+     },
+     "shop-b" = {
+       google_sheets_id = "spreadsheet-id-for-b"
+       gemini_api_key = "api-key-for-b"
+       elevenlabs_api_key = "tts-key-for-b"
+     }
+   }
+   ```
+3. **Terraformの適用**:
    ```bash
    cd terraform
    terraform init
    terraform apply
    ```
+   実行後、各ボットの URL が出力されます。ボットを追加したい場合は `bots` マップに要素を追加して再度 `apply` するだけです。
 
 ## スプレッドシート連携 (GAS)
 

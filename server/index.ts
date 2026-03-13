@@ -16,6 +16,19 @@ const app = express();
 // Security: Trust proxy for Cloud Run to get correct client IP for rate limiting
 app.set('trust proxy', 1);
 
+// Security: Use environment variable for allowed origins
+const allowedOrigins = process.env.ALLOWED_ORIGINS 
+    ? (process.env.ALLOWED_ORIGINS.includes(',') ? process.env.ALLOWED_ORIGINS.split(',') : process.env.ALLOWED_ORIGINS)
+    : "*";
+
+// 1. CORS Middleware (Must be FIRST)
+app.use(cors({
+    origin: allowedOrigins,
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true
+}));
+
 // Security: Rate limiting
 const limiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
@@ -28,11 +41,6 @@ const limiter = rateLimit({
 app.use(limiter);
 
 const httpServer = createServer(app);
-
-// Security: Use environment variable for allowed origins
-const allowedOrigins = process.env.ALLOWED_ORIGINS 
-    ? process.env.ALLOWED_ORIGINS.split(',') 
-    : "*";
 
 const io = new Server(httpServer, {
     cors: {
@@ -64,9 +72,6 @@ io.use((socket, next) => {
 
 
 // Middleware
-app.use(cors({
-    origin: allowedOrigins
-}));
 app.use(express.json());
 
 // Static files (Widget)
@@ -230,4 +235,4 @@ function removeMarkdownLinks(text: string): string {
     clean = clean.replace(/\[((?:[^[\]]|\[[^\]]*\])+)\]\s+\(([^)]+)\)/g, '$1');
 
     return clean;
-} 
+}

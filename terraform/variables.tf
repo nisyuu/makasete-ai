@@ -9,25 +9,26 @@ variable "region" {
   default     = "asia-northeast1"
 }
 
-variable "service_name" {
-  description = "Cloud Run Service Name"
-  type        = string
-  default     = "makasete-bot"
-}
-
 variable "container_image" {
   description = "Container Image URL"
   type        = string
 }
 
-variable "google_sheets_id" {
-  type = string
+variable "bots" {
+  type = map(object({
+    google_sheets_id = string
+    gemini_api_key   = string
+    elevenlabs_api_key = string
+  }))
+  description = "Map of bot configurations. The key will be used as the service name suffix."
 }
 
-variable "gemini_api_key" {
-  type = string
+variable "allowed_origins" {
+  type    = string
+  default = "*"
 }
 
-variable "elevenlabs_api_key" {
-  type = string
+variable "tts_provider" {
+  type    = string
+  default = "gemini"
 }
