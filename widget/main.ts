@@ -20,7 +20,7 @@ import { ChatWidget } from './widget';
     container.innerHTML = `
         <div class="chat-window">
              <div class="chat-header">
-                <span>AI店員</span>
+                <span>AIアシスタント</span>
                 <div class="header-controls">
                     <button class="audio-toggle-btn" title="音声読み上げOFF">
                         <span class="audio-icon">🔇</span>
@@ -43,7 +43,7 @@ import { ChatWidget } from './widget';
                 <div class="loading-text">準備中です。少々お待ちください...</div>
              </div>
         </div>
-        <button class="launcher-button" title="AI店員に相談する">
+        <button class="launcher-button" title="AIアシスタントに相談する">
             <svg class="launcher-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                 <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3H9a3 3 0 0 1-3-3v-8a3 3 0 0 1 3-3h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2M9 9a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1H9m3 2a2 2 0 0 1 2 2a2 2 0 0 1-2 2a2 2 0 0 1-2-2a2 2 0 0 1 2-2M2 13h2v2H2v-2m18 0h2v2h-2v-2z"/>
             </svg>

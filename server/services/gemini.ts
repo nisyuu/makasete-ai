@@ -26,7 +26,7 @@ export async function generateResponseStream(prompt: string, history: any[] = []
     }
 
     // Get all data from sheets
-    const basePrompt = getSystemPrompt() || `あなたは親切なAI店員です。`;
+    const basePrompt = getSystemPrompt() || `あなたは親切なAIアシスタントです。`;
     const allData = getAllSheetData();
 
     // Construct Contexts Dynamically
