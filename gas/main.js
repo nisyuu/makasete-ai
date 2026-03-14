@@ -5,7 +5,7 @@
 // Use Script Properties to manage environment-specific values
 const scriptProperties = PropertiesService.getScriptProperties();
 const PROJECT_ID = scriptProperties.getProperty('PROJECT_ID');
-const TRIGGER_NAME = scriptProperties.getProperty('TRIGGER_NAME');
+const TRIGGER_ID = scriptProperties.getProperty('TRIGGER_ID');
 
 /**
  * Adds a custom menu to the spreadsheet on open.
@@ -31,12 +31,12 @@ function triggerCloudBuild() {
   if (response !== ui.Button.YES) return;
 
   try {
-    if (!PROJECT_ID || !TRIGGER_NAME) {
-      throw new Error('PROJECT_ID または TRIGGER_NAME がスクリプトプロパティに設定されていません。GASの[設定 > スクリプトプロパティ]を確認してください。');
+    if (!PROJECT_ID || !TRIGGER_ID) {
+      throw new Error('PROJECT_ID または TRIGGER_ID がスクリプトプロパティに設定されていません。GASの[設定 > スクリプトプロパティ]を確認してください。');
     }
     const token = ScriptApp.getOAuthToken();
     // Use the REST API to run the trigger
-    const url = `https://cloudbuild.googleapis.com/v1/projects/${PROJECT_ID}/triggers/${TRIGGER_NAME}:run`;
+    const url = `https://cloudbuild.googleapis.com/v1/projects/${PROJECT_ID}/triggers/${TRIGGER_ID}:run`;
     
     const options = {
       method: 'post',
