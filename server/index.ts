@@ -10,7 +10,7 @@ import { generateResponseStream } from './services/gemini';
 import { getTTSService } from './services/tts/factory';
 import { TTSService } from './services/tts/types';
 import { StreamBuffer } from './utils/streamBuffer';
-import { stripTags, cleanupForTTS, isSsml } from './utils/text';
+import { stripTags, cleanupForTTS, isSsml, hasTags, removeMarkdownLinks } from './utils/text';
 
 const app = express();
 
@@ -188,9 +188,21 @@ async function processSentence(socket: Socket, sentence: string, isVoiceInput: b
 
         try {
             // 2. Prepare text for TTS
-            const ttsInput = isSsml(sentence) ? sentence : cleanupForTTS(sentence);
+            let ttsInput: string;
+            
+            if (hasTags(sentence)) {
+                // If it contains tags, ensure it's a valid SSML document by wrapping in <speak>
+                // First remove any split-off fragments of <speak> to avoid nesting
+                const innerText = sentence.replace(/<\/?speak>/g, '').trim();
+                // Basic cleanup for SSML content (keep tags but remove Markdown links)
+                ttsInput = `<speak>${removeMarkdownLinks(innerText)}</speak>`;
+            } else {
+                // Otherwise, perform standard cleanup for plain text
+                ttsInput = cleanupForTTS(sentence);
+            }
 
-            if (!ttsInput) return;
+            // Skip if no actual text to read (stripping tags reveals empty content)
+            if (!stripTags(ttsInput).trim()) return;
 
             const audioStream: NodeJS.ReadableStream = await ttsService.generateSpeechStream(ttsInput);
 

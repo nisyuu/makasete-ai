@@ -13,9 +13,13 @@ export function stripTags(text: string): string {
  * Removes standard markdown links [text](url) and keeps only the text.
  */
 export function removeMarkdownLinks(text: string): string {
-    // 1. Standard markdown links [text](url) -> text
-    let clean = text.replace(/\[((?:[^[\]]|\[[^\]]*\])+)\]\(([^)]+)\)/g, '$1');
-    // 2. Handle cases where there might be a space between ] and ( by mistake
+    // 1. Escape '&' as it's a special character in XML/SSML
+    let clean = text.replace(/&/g, '&amp;');
+
+    // 2. Standard markdown links [text](url) -> text
+    clean = clean.replace(/\[((?:[^[\]]|\[[^\]]*\])+)\]\(([^)]+)\)/g, '$1');
+    
+    // 3. Handle cases where there might be a space between ] and ( by mistake
     clean = clean.replace(/\[((?:[^[\]]|\[[^\]]*\])+)\]\s+\(([^)]+)\)/g, '$1');
     return clean;
 }
@@ -38,4 +42,11 @@ export function cleanupForTTS(text: string): string {
  */
 export function isSsml(text: string): boolean {
     return text.trim().startsWith('<speak>');
+}
+
+/**
+ * Checks if the text contains any HTML/SSML tags.
+ */
+export function hasTags(text: string): boolean {
+    return /<[^>]*>/.test(text);
 }
