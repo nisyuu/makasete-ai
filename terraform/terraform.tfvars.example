@@ -1,5 +1,5 @@
 project_id      = "your-project-id"
-container_image  = "asia-northeast1-docker.pkg.dev/your-project-id/makasete-bot-repo/makasete-bot:latest"
+container_image  = "asia-northeast1-docker.pkg.dev/your-project-id/makasete-ai-repo/makasete-ai:latest"
 
 bots = {
   "bot-1" = {

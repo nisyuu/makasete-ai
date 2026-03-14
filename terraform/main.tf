@@ -8,7 +8,7 @@ data "google_project" "project" {}
 
 resource "google_cloud_run_service" "bots" {
   for_each = var.bots
-  name     = "makasete-bot-${each.key}"
+  name     = "makasete-ai-${each.key}"
   location = var.region
 
   template {

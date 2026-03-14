@@ -62,11 +62,11 @@ export class ChatWidget {
             if (response.ok) {
                 this.loadingOverlay.classList.add('hidden');
             } else {
-                console.warn("[MakaseteBot] Failed to verify data readiness");
+                console.warn("[MakaseteAI] Failed to verify data readiness");
                 // Optional: show error in overlay
             }
         } catch (e) {
-            console.error("[MakaseteBot] Error waiting for data:", e);
+            console.error("[MakaseteAI] Error waiting for data:", e);
         }
     }
 
@@ -88,7 +88,7 @@ export class ChatWidget {
         });
 
         this.socket.on('error', (data: { message: string }) => {
-            console.error("[MakaseteBot] Server error:", data.message);
+            console.error("[MakaseteAI] Server error:", data.message);
             this.appendMessage('bot', `エラーが発生しました: ${data.message}`);
         });
     }
@@ -106,7 +106,7 @@ export class ChatWidget {
         } else if (content instanceof Uint8Array) {
             rawData = content.buffer;
         } else {
-            console.warn('[MakaseteBot] Unexpected audio format');
+            console.warn('[MakaseteAI] Unexpected audio format');
             return;
         }
 
@@ -129,7 +129,7 @@ export class ChatWidget {
             // Safety timeout: If audio doesn't start/end within 15s, force next
             const timeout = setTimeout(() => {
                 if (this.isPlaying) {
-                    console.warn('[MakaseteBot] Audio playback timed out');
+                    console.warn('[MakaseteAI] Audio playback timed out');
                     this.onAudioEnded();
                 }
             }, 15000);
@@ -139,7 +139,7 @@ export class ChatWidget {
                     // Play started
                 })
                 .catch(e => {
-                    console.warn('[MakaseteBot] Play failed:', e);
+                    console.warn('[MakaseteAI] Play failed:', e);
                     clearTimeout(timeout);
                     this.onAudioEnded();
                 });

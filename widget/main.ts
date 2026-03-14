@@ -2,7 +2,7 @@ import styles from './styles.css?inline';
 import { ChatWidget } from './widget';
 
 (function () {
-    const hostId = 'ec-voice-widget-root';
+    const hostId = 'makasete-ai-widget-root';
     if (document.getElementById(hostId)) return;
 
     const host = document.createElement('div');
@@ -84,7 +84,7 @@ import { ChatWidget } from './widget';
     }
 
     if (!serverUrl) {
-        console.error('MakaseteBot: Could not determine server URL.');
+        console.error('MakaseteAI: Could not determine server URL.');
     }
 
     new ChatWidget(shadow, serverUrl);

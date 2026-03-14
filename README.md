@@ -106,7 +106,7 @@ Terraformを使用してデプロイします。本システムは、複数の�
 
 1. **Dockerイメージのビルドとプッシュ**:
    ```bash
-   gcloud builds submit --tag asia-northeast1-docker.pkg.dev/[PROJECT_ID]/makasete-bot-repo/makasete-bot:latest
+   gcloud builds submit --tag asia-northeast1-docker.pkg.dev/[PROJECT_ID]/makasete-ai-repo/makasete-ai:latest
    ```
 2. **環境設定 (`terraform/terraform.tfvars`)**:
    `terraform/terraform.tfvars.example` を参考に、ボットの設定（スプレッドシートIDやAPIキー）を記述します。
@@ -144,7 +144,7 @@ Terraformを使用してデプロイします。本システムは、複数の�
 2. `gas/main.js` の内容をエディタにコピー＆ペーストします。
 3. スクリプト内の以下の変数を、自身の環境に合わせて書き換えます：
    - `PROJECT_ID`: Google Cloud のプロジェクトID
-   - `TRIGGER_NAME`: Cloud Build のトリガー名（例: `redeploy-makasete-bot`）
+   - `TRIGGER_NAME`: Cloud Build のトリガー名（例: `redeploy-makasete-ai`）
 4. 保存してスプレッドシートをリロードすると、メニューに **[🤖 Makasete Bot]** が追加されます。
 
 ### 使い方
