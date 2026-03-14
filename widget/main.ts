@@ -84,7 +84,7 @@ import { ChatWidget } from './widget';
     }
 
     if (!serverUrl) {
-        console.error('MakaseteBot: Could not determine server URL.');
+        console.error('MakaseteAI: Could not determine server URL.');
     }
 
     new ChatWidget(shadow, serverUrl);

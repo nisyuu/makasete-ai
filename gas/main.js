@@ -4,7 +4,7 @@
 
 // These will be managed via Script Properties or environment later
 const PROJECT_ID = 'makasete-ai';
-const TRIGGER_NAME = 'redeploy-makasete-bot'; // Manual trigger name
+const TRIGGER_NAME = 'redeploy-makasete-ai'; // Manual trigger name
 
 /**
  * Adds a custom menu to the spreadsheet on open.
