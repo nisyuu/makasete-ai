@@ -10,6 +10,7 @@ import { generateResponseStream } from './services/gemini';
 import { getTTSService } from './services/tts/factory';
 import { TTSService } from './services/tts/types';
 import { StreamBuffer } from './utils/streamBuffer';
+import { stripTags, cleanupForTTS, isSsml } from './utils/text';
 
 const app = express();
 
@@ -178,22 +179,20 @@ io.on('connection', (socket) => {
 });
 
 async function processSentence(socket: Socket, sentence: string, isVoiceInput: boolean, ttsService: TTSService) {
+    // 1. Prepare text for UI by removing SSML tags
+    const uiText = stripTags(sentence);
+
     if (isVoiceInput) {
-        socket.emit('audio-chunk', { type: 'text', content: sentence });
+        // Send clean text to UI
+        socket.emit('audio-chunk', { type: 'text', content: uiText });
 
         try {
-            // Cleanup: remove links, URLs, emojis, and extra symbols for cleaner TTS
-            const cleanSentence = removeMarkdownLinks(sentence)
-                .replace(/(^|\s)\/[a-zA-Z0-9][-a-zA-Z0-9/._+&@#%=~]*(\b|$)/g, '$1') // Remove relative paths like /books/1 but keep dates like 2024/03/12
-                .replace(/https?:\/\/\S+/g, '') // Remove full HTTP/HTTPS URLs
-                .replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '') // Remove Emojis
-                .replace(/[＊*#]/g, '') // Remove common markdown symbols
-                .replace(/\s+/g, ' ') // Collapse extra spaces
-                .trim();
+            // 2. Prepare text for TTS
+            const ttsInput = isSsml(sentence) ? sentence : cleanupForTTS(sentence);
 
-            if (!cleanSentence) return; // Skip if nothing to read
+            if (!ttsInput) return;
 
-            const audioStream: NodeJS.ReadableStream = await ttsService.generateSpeechStream(cleanSentence);
+            const audioStream: NodeJS.ReadableStream = await ttsService.generateSpeechStream(ttsInput);
 
             const chunks: Buffer[] = [];
             audioStream.on('data', (chunk: Buffer) => {
@@ -217,7 +216,7 @@ async function processSentence(socket: Socket, sentence: string, isVoiceInput: b
             console.error("TTS Error:", message);
         }
     } else {
-        socket.emit('text-chunk', { content: sentence });
+        socket.emit('text-chunk', { content: uiText });
     }
 }
 
@@ -226,13 +225,3 @@ const PORT = config.port;
 httpServer.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });
-
-function removeMarkdownLinks(text: string): string {
-    // 1. Standard markdown links [text](url) -> text
-    let clean = text.replace(/\[((?:[^[\]]|\[[^\]]*\])+)\]\(([^)]+)\)/g, '$1');
-    
-    // 2. Handle cases where there might be a space between ] and ( by mistake
-    clean = clean.replace(/\[((?:[^[\]]|\[[^\]]*\])+)\]\s+\(([^)]+)\)/g, '$1');
-
-    return clean;
-}
