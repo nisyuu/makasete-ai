@@ -2,7 +2,7 @@ import styles from './styles.css?inline';
 import { ChatWidget } from './widget';
 
 (function () {
-    const hostId = 'ec-voice-widget-root';
+    const hostId = 'makasete-ai-widget-root';
     if (document.getElementById(hostId)) return;
 
     const host = document.createElement('div');
