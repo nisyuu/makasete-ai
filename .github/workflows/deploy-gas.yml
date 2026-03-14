@@ -1,10 +1,10 @@
 name: Deploy Google Apps Script
 
 on:
-  push:
-    branches: [ main ]
-    paths:
-      - 'gas/**'
+#  push:
+#    branches: [ main ]
+#    paths:
+#      - 'gas/**'
   workflow_dispatch:
 
 jobs:
