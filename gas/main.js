@@ -1,18 +1,19 @@
 /**
- * Makasete Bot - Spreadsheet Menu & Build Trigger
+ * Makasete AI - Spreadsheet Menu & Build Trigger
  */
 
-// These will be managed via Script Properties or environment later
-const PROJECT_ID = 'makasete-ai';
-const TRIGGER_NAME = 'redeploy-makasete-ai'; // Manual trigger name
+// Use Script Properties to manage environment-specific values
+const scriptProperties = PropertiesService.getScriptProperties();
+const PROJECT_ID = scriptProperties.getProperty('PROJECT_ID');
+const TRIGGER_ID = scriptProperties.getProperty('TRIGGER_ID');
 
 /**
  * Adds a custom menu to the spreadsheet on open.
  */
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
-  ui.createMenu('🤖 Makasete Bot')
-    .addItem('🚀 サーバーを再構築 (デプロイ)', 'triggerCloudBuild')
+  ui.createMenu('🤖 Makasete AI')
+    .addItem('🚀 スプレッドシートの情報をMakasete AIに反映', 'triggerCloudBuild')
     .addToUi();
 }
 
@@ -23,16 +24,19 @@ function triggerCloudBuild() {
   const ui = SpreadsheetApp.getUi();
   const response = ui.alert(
     '確認',
-    '最新のソースコードとスプレッドシートの情報でサーバーを再構築しますか？\n（完了まで数分かかります）',
+    '最新のスプレッドシートの情報をMakasete AIに反映しますか？\n（完了まで数分〜10分程度かかります）',
     ui.ButtonSet.YES_NO
   );
 
   if (response !== ui.Button.YES) return;
 
   try {
+    if (!PROJECT_ID || !TRIGGER_ID) {
+      throw new Error('PROJECT_ID または TRIGGER_ID がスクリプトプロパティに設定されていません。GASの[設定 > スクリプトプロパティ]を確認してください。');
+    }
     const token = ScriptApp.getOAuthToken();
     // Use the REST API to run the trigger
-    const url = `https://cloudbuild.googleapis.com/v1/projects/${PROJECT_ID}/triggers/${TRIGGER_NAME}:run`;
+    const url = `https://cloudbuild.googleapis.com/v1/projects/${PROJECT_ID}/triggers/${TRIGGER_ID}:run`;
     
     const options = {
       method: 'post',
@@ -50,7 +54,7 @@ function triggerCloudBuild() {
     const result = JSON.parse(res.getContentText());
 
     if (res.getResponseCode() === 200) {
-      ui.alert('✅ ビルドを開始しました', 'Google Cloud Console の Cloud Build 画面で進捗を確認できます。', ui.ButtonSet.OK);
+      ui.alert('✅ ビルドを開始しました', '反映まで今しばらくお待ちください。', ui.ButtonSet.OK);
     } else {
       throw new Error(result.error ? result.error.message : 'Unknown error');
     }
