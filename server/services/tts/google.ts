@@ -40,10 +40,11 @@ export class GeminiTTSService implements TTSService {
         const client = await this.getClient();
 
         try {
+            const isSsml = text.trim().startsWith('<speak>');
             const [response] = await new Promise<[texttospeech_v1.Schema$SynthesizeSpeechResponse]>((resolve, reject) => {
                 client.text.synthesize({
                     requestBody: {
-                        input: { text },
+                        input: isSsml ? { ssml: text } : { text },
                         voice: { languageCode: 'ja-JP', name: 'ja-JP-Neural2-D' }, 
                         audioConfig: { 
                             audioEncoding: 'MP3',
