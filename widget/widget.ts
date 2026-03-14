@@ -23,7 +23,7 @@ export class ChatWidget {
 
     // State
     private isRecording = false;
-    private isAudioEnabled = true;
+    private isAudioEnabled = false;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     private recognition: any = null;
     private serverUrl: string;
