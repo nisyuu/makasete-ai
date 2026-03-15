@@ -9,9 +9,9 @@ resource "google_cloudbuild_trigger" "manual_deploy" {
     name  = split("/", var.github_repository)[1]
     
     push {
-      # Disable auto-trigger on any branch push by matching everything but inverting it
-      branch       = ".*"
-      invert_regex = true
+      # Use a branch name that won't exist to effectively disable auto-trigger
+      # while keeping it as a 'push' event trigger which is required for 1st Gen
+      branch = "disabled-auto-trigger-use-manual-instead"
     }
   }
 
