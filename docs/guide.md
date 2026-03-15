@@ -60,8 +60,7 @@ AIを活用した、**音声とテキストどちらにも対応**したチャ�
 
 - Node.js (Express) / Socket.io
 - LLM: Google Gemini API
-- TTS: Google Cloud Text-to-Speech or ElevenLabs
-  - デフォルトでは Google TTS を使用。ElevenLabs も選択可能。
+- TTS: Google Cloud Text-to-Speech or ElevenLabs（デフォルトでは Google TTS）
 
 ### インフラ
 
