@@ -132,5 +132,5 @@ Makasete AI は、最新のAI技術を手軽に、そして安価にサイトへ
 
 # Q&A / お問い合わせ
 
-- **お問い合わせフォーム**: [こちらから](https://aiform.nisyuu.com/view/PgMRN033hK9QkongeWWS)
-- **詳細資料**: [GitHub リポジトリ](https://github.com/nisyuu/makasete-ai)
+[お問い合わせフォーム](https://aiform.nisyuu.com/view/PgMRN033hK9QkongeWWS)
+[GitHub リポジトリ](https://github.com/nisyuu/makasete-ai)

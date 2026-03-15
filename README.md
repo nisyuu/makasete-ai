@@ -1,6 +1,7 @@
 # Makasete AI
 
-Google Geminiを活用した、ECサイト・サービスサイト向け音声対話チャットボットウィジェット。
+Makasete AIは、スプレッドシートで管理できるAIチャットボットです。
+ECサイトやサービスサイトに簡単導入でき、音声とテキストの両方でユーザーと対話できます。
 
 **[📖 導入ガイド（スライド）はこちら](https://nisyuu.github.io/makasete-ai/)**
 
