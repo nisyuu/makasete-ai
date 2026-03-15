@@ -22,4 +22,4 @@ steps:
         done
 
 options:
-  logging: CLOUD_LOGGING
+  logging: LEGACY
