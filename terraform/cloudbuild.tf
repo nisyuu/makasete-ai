@@ -2,7 +2,6 @@
 resource "google_cloudbuild_trigger" "manual_deploy" {
   name        = "makasete-ai-manual-deploy"
   description = "Manual build trigger for Makasete AI (Invoked via GAS)"
-  location    = "global"
 
   # 1st Gen GitHub App connection
   github {
@@ -10,8 +9,8 @@ resource "google_cloudbuild_trigger" "manual_deploy" {
     name  = split("/", var.github_repository)[1]
     
     push {
-      # Matches nothing, disabling auto-trigger on push
-      branch = "^$"
+      # Use a branch name that won't exist to disable auto-trigger
+      branch = "manual-trigger-only"
     }
   }
 
