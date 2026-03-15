@@ -20,6 +20,3 @@ steps:
           echo "Deploying to $service..."
           gcloud run deploy $service --image asia-northeast1-docker.pkg.dev/$PROJECT_ID/makasete-ai-repo/makasete-ai:latest --region asia-northeast1 --platform managed --quiet
         done
-
-options:
-  logging: LEGACY
