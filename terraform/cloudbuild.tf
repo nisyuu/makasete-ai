@@ -16,6 +16,8 @@ resource "google_cloudbuild_trigger" "manual_deploy" {
 
   filename = "cloudbuild.yaml"
 
+  service_account = "projects/${var.project_id}/serviceAccounts/${data.google_project.project.number}@cloudbuild.gserviceaccount.com"
+
   depends_on = [google_project_service.cloudbuild]
 }
 
