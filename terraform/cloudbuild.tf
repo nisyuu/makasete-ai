@@ -17,13 +17,15 @@ resource "google_cloudbuild_trigger" "manual_deploy" {
 
   filename = "cloudbuild.yaml"
 
-  # Cloud Build Service Account (Default Cloud Build SA)
-  service_account = "projects/${var.project_id}/serviceAccounts/${data.google_project.project.number}@cloudbuild.gserviceaccount.com"
+  # Let Cloud Build select the default service account
+  # (Requires enabling the Cloud Build API first)
 
   depends_on = [google_project_service.cloudbuild]
 }
 
-# IAM: Grant Cloud Build permission to deploy to Cloud Run
+# IAM: Use the project number based default Cloud Build service account
+# Format: [PROJECT_NUMBER]@cloudbuild.gserviceaccount.com
+
 resource "google_project_iam_member" "cloudbuild_run_admin" {
   project = var.project_id
   role    = "roles/run.developer"
