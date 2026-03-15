@@ -1,7 +1,9 @@
 # Cloud Build Trigger for Manual Deployment (GAS-triggered) - 1st Gen
 resource "google_cloudbuild_trigger" "manual_deploy" {
-  name        = "makasete-ai-manual-deploy"
+  # Change name to force recreation and avoid "invalid argument" on update
+  name        = "makasete-ai-manual-deploy-v2"
   description = "Manual build trigger for Makasete AI (Invoked via GAS)"
+  location    = "global"
 
   # 1st Gen GitHub App connection
   github {
@@ -9,16 +11,12 @@ resource "google_cloudbuild_trigger" "manual_deploy" {
     name  = split("/", var.github_repository)[1]
     
     push {
-      # Use a branch name that won't exist to effectively disable auto-trigger
-      # while keeping it as a 'push' event trigger which is required for 1st Gen
-      branch = "disabled-auto-trigger-use-manual-instead"
+      # Matches nothing, disabling auto-trigger on push
+      branch = "^$"
     }
   }
 
   filename = "cloudbuild.yaml"
-
-  # Let Cloud Build select the default service account
-  # (Requires enabling the Cloud Build API first)
 
   depends_on = [google_project_service.cloudbuild]
 }
