@@ -1,6 +1,9 @@
 # Makasete AI
 
-Google Geminiを活用した、ECサイト・サービスサイト向け音声対話チャットボットウィジェット。
+Makasete AIは、スプレッドシートで管理できるAIチャットボットです。
+ECサイトやサービスサイトに簡単導入でき、音声とテキストの両方でユーザーと対話できます。
+
+**[📖 導入ガイド（スライド）はこちら](https://nisyuu.github.io/makasete-ai/)**
 
 ## 特徴
 
@@ -123,27 +126,22 @@ ECサイトの `</body>` タグの直前に以下のスクリプトを追加し�
 Terraformを使用してデプロイします。本システムは、複数のスプレッドシート（ボット）を同時にホストすることが可能です。
 
 1. **Dockerイメージのビルドとプッシュ**:
+   初回のみ、手動でビルドとプッシュを行います。
    ```bash
    gcloud builds submit --tag asia-northeast1-docker.pkg.dev/[PROJECT_ID]/makasete-ai-repo/makasete-ai:latest
    ```
 2. **環境設定 (`terraform/terraform.tfvars`)**:
-   `terraform/terraform.tfvars.example` を参考に、ボットの設定（スプレッドシートIDやAPIキー）を記述します。
+   `terraform/terraform.tfvars.example` を参考に、ボットの設定およびGitHub連携設定を記述します。
 
    ```hcl
    project_id = "your-project-id"
    container_image = "asia-northeast1-docker.pkg.dev/..."
 
+   github_repository    = "your-username/makasete-ai"
+   github_connection_id = "your-github-connection-id" # Cloud Buildの接続ID
+
    bots = {
-     "shop-a" = {
-       google_sheets_id = "spreadsheet-id-for-a"
-       gemini_api_key = "api-key-for-a"
-       elevenlabs_api_key = "tts-key-for-a"
-     },
-     "shop-b" = {
-       google_sheets_id = "spreadsheet-id-for-b"
-       gemini_api_key = "api-key-for-b"
-       elevenlabs_api_key = "tts-key-for-b"
-     }
+     # ...
    }
    ```
 
@@ -153,7 +151,7 @@ Terraformを使用してデプロイします。本システムは、複数の�
    terraform init
    terraform apply
    ```
-   実行後、各ボットの URL が出力されます。ボットを追加したい場合は `bots` マップに要素を追加して再度 `apply` するだけです。
+   実行後、各ボットの URL および **Cloud Build トリガーID** が出力されます。このトリガーIDを後述のGAS設定で使用します。
 
 ## スプレッドシート連携 (GAS)
 

@@ -16,3 +16,5 @@ bots = {
 
 allowed_origins = "*"
 tts_provider    = "gemini"
+
+github_repository     = "your-username/makasete-ai"

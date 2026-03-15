@@ -1,0 +1,43 @@
+name: Deploy Marp Slides to GitHub Pages
+
+on:
+  push:
+    branches:
+      - develop
+    paths:
+      - 'docs/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create build directory
+        run: mkdir -p build && chmod 777 build
+
+      - name: Build Marp HTML
+        uses: docker://marpteam/marp-cli:latest
+        env:
+          MARP_USER: root:root
+        with:
+          args: docs/guide.md -o build/index.html --html
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: 'build'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

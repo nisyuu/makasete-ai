@@ -32,3 +32,8 @@ variable "tts_provider" {
   type    = string
   default = "gemini"
 }
+
+variable "github_repository" {
+  type        = string
+  description = "The GitHub repository in the format owner/name (e.g., nisyuu/makasete-ai)"
+}
