@@ -1,0 +1,25 @@
+steps:
+  # 1. Build Docker Image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'asia-northeast1-docker.pkg.dev/$PROJECT_ID/makasete-ai-repo/makasete-ai:latest', '.']
+
+  # 2. Push Docker Image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'asia-northeast1-docker.pkg.dev/$PROJECT_ID/makasete-ai-repo/makasete-ai:latest']
+
+  # 3. Deploy to Cloud Run (for each bot)
+  # NOTE: Using a script to loop through bots or multiple gcloud steps
+  # For simplicity, we assume we redeploy all existing bots
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        for service in $(gcloud run services list --format="value(SERVICE)" --filter="metadata.name ~ ^makasete-ai-")
+        do
+          echo "Deploying to $service..."
+          gcloud run deploy $service --image asia-northeast1-docker.pkg.dev/$PROJECT_ID/makasete-ai-repo/makasete-ai:latest --region asia-northeast1 --platform managed --quiet
+        done
+
+options:
+  logging: CLOUD_LOGGING
