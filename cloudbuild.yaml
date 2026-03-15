@@ -13,14 +13,13 @@ steps:
     args:
       - '-c'
       - |
-        TARGET_SERVICE="${_SERVICE_NAME}"
-        if [ -z "$TARGET_SERVICE" ]; then
+        if [ -z "${_SERVICE_NAME}" ]; then
           echo "Error: _SERVICE_NAME must be specified."
           exit 1
         fi
         
-        echo "Deploying ONLY to $TARGET_SERVICE..."
-        gcloud run deploy "$TARGET_SERVICE" --image "asia-northeast1-docker.pkg.dev/$PROJECT_ID/makasete-ai-repo/makasete-ai:latest" --region asia-northeast1 --platform managed --quiet
+        echo "Deploying ONLY to ${_SERVICE_NAME}..."
+        gcloud run deploy "${_SERVICE_NAME}" --image "asia-northeast1-docker.pkg.dev/$PROJECT_ID/makasete-ai-repo/makasete-ai:latest" --region asia-northeast1 --platform managed --quiet
 
 substitutions:
   _SERVICE_NAME: ""
