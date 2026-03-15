@@ -7,17 +7,23 @@ steps:
   - name: 'gcr.io/cloud-builders/docker'
     args: ['push', 'asia-northeast1-docker.pkg.dev/$PROJECT_ID/makasete-ai-repo/makasete-ai:latest']
 
-  # 3. Deploy to Cloud Run (for each bot)
+  # 3. Deploy to Cloud Run (Specific Service Only)
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
-        for service in $(gcloud run services list --format="value(SERVICE)" --filter="metadata.name ~ ^makasete-ai-")
-        do
-          echo "Deploying to $service..."
-          gcloud run deploy $service --image asia-northeast1-docker.pkg.dev/$PROJECT_ID/makasete-ai-repo/makasete-ai:latest --region asia-northeast1 --platform managed --quiet
-        done
+        TARGET_SERVICE="${_SERVICE_NAME}"
+        if [ -z "$TARGET_SERVICE" ]; then
+          echo "Error: _SERVICE_NAME must be specified."
+          exit 1
+        fi
+        
+        echo "Deploying ONLY to $TARGET_SERVICE..."
+        gcloud run deploy "$TARGET_SERVICE" --image "asia-northeast1-docker.pkg.dev/$PROJECT_ID/makasete-ai-repo/makasete-ai:latest" --region asia-northeast1 --platform managed --quiet
+
+substitutions:
+  _SERVICE_NAME: ""
 
 options:
   logging: CLOUD_LOGGING_ONLY
