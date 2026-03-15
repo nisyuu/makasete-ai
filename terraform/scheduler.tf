@@ -33,6 +33,7 @@ resource "google_workflows_workflow" "scale_workflow" {
   region          = var.region
   description     = "Updates Cloud Run min-instances"
   service_account = google_service_account.workflow_sa.email
+  # deletion_protection = false
   source_contents = <<EOF
 main:
   params: [args]

@@ -8,8 +8,6 @@ steps:
     args: ['push', 'asia-northeast1-docker.pkg.dev/$PROJECT_ID/makasete-ai-repo/makasete-ai:latest']
 
   # 3. Deploy to Cloud Run (for each bot)
-  # NOTE: Using a script to loop through bots or multiple gcloud steps
-  # For simplicity, we assume we redeploy all existing bots
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'bash'
     args:
@@ -22,4 +20,4 @@ steps:
         done
 
 options:
-  logging: LEGACY
+  logging: CLOUD_LOGGING_ONLY

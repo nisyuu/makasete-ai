@@ -1,39 +1,54 @@
-# Cloud Build Trigger for Manual Deployment (GAS-triggered) - 1st Gen
+# 1. Cloud Build execution service account (User-managed)
+resource "google_service_account" "cloudbuild_sa" {
+  account_id   = "cloudbuild-deploy-sa"
+  display_name = "Cloud Build Deploy Service Account"
+}
+
+# 2. Grant permissions to the dedicated service account
+resource "google_project_iam_member" "cloudbuild_sa_roles" {
+  for_each = toset([
+    "roles/run.developer",
+    "roles/iam.serviceAccountUser",
+    "roles/logging.logWriter",
+    "roles/artifactregistry.writer"
+  ])
+  project = var.project_id
+  role    = each.key
+  member  = "serviceAccount:${google_service_account.cloudbuild_sa.email}"
+}
+
+# 3. Allow Cloud Build Service Agent to use this service account
+# This is required to prevent the "400 Invalid Argument" error when creating a trigger with a custom SA.
+resource "google_service_account_iam_member" "cloudbuild_service_agent_user" {
+  service_account_id = google_service_account.cloudbuild_sa.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-cloudbuild.iam.gserviceaccount.com"
+}
+
+# 4. Cloud Build Trigger for Manual Deployment (GAS-triggered)
 resource "google_cloudbuild_trigger" "manual_deploy" {
   name        = "makasete-ai-manual-deploy"
   description = "Manual build trigger for Makasete AI (Invoked via GAS)"
+  location    = "global"
 
-  # 1st Gen GitHub App connection
   github {
     owner = split("/", var.github_repository)[0]
     name  = split("/", var.github_repository)[1]
     
     push {
-      # Disable auto-trigger on any branch push by matching everything but inverting it
-      branch       = ".*"
-      invert_regex = true
+      branch = "manual-trigger-only"
     }
   }
 
   filename = "cloudbuild.yaml"
 
-  # Cloud Build Service Account (Default Cloud Build SA)
-  service_account = "projects/${var.project_id}/serviceAccounts/${data.google_project.project.number}@cloudbuild.gserviceaccount.com"
+  # Use the dedicated service account
+  service_account = google_service_account.cloudbuild_sa.id
 
-  depends_on = [google_project_service.cloudbuild]
-}
-
-# IAM: Grant Cloud Build permission to deploy to Cloud Run
-resource "google_project_iam_member" "cloudbuild_run_admin" {
-  project = var.project_id
-  role    = "roles/run.developer"
-  member  = "serviceAccount:${data.google_project.project.number}@cloudbuild.gserviceaccount.com"
-}
-
-resource "google_project_iam_member" "cloudbuild_sa_user" {
-  project = var.project_id
-  role    = "roles/iam.serviceAccountUser"
-  member  = "serviceAccount:${data.google_project.project.number}@cloudbuild.gserviceaccount.com"
+  depends_on = [
+    google_project_service.cloudbuild,
+    google_service_account_iam_member.cloudbuild_service_agent_user
+  ]
 }
 
 resource "google_project_service" "cloudbuild" {
