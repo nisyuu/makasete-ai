@@ -1,7 +1,6 @@
 # Cloud Build Trigger for Manual Deployment (GAS-triggered) - 1st Gen
 resource "google_cloudbuild_trigger" "manual_deploy" {
-  # Change name to force recreation and avoid "invalid argument" on update
-  name        = "makasete-ai-manual-deploy-v2"
+  name        = "makasete-ai-manual-deploy"
   description = "Manual build trigger for Makasete AI (Invoked via GAS)"
   location    = "global"
 
