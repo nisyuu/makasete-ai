@@ -1,6 +1,6 @@
 # Makasete AI
 
-Makasete AIは、スプレッドシートで管理できるMakasete AI サーバーです。
+Makasete AIは、スプレッドシートで管理できるAIチャットボットです。
 ECサイトやサービスサイトに簡単導入でき、音声とテキストの両方でユーザーと対話できます。
 
 **[📖 導入ガイド（スライド）はこちら](https://nisyuu.github.io/makasete-ai/)**
