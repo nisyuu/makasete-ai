@@ -20,8 +20,8 @@ resource "google_artifact_registry_repository" "repo" {
 # IAM: Grant access to Cloud Run Service Account (Optional: if needed for other services)
 data "google_project" "project" {}
 
-resource "google_cloud_run_service" "bots" {
-  for_each = var.bots
+resource "google_cloud_run_service" "makasete_servers" {
+  for_each = var.makasete_servers
   name     = "makasete-ai-${each.key}"
   location = var.region
 
@@ -90,14 +90,14 @@ data "google_iam_policy" "noauth" {
 }
 
 resource "google_cloud_run_service_iam_policy" "noauth" {
-  for_each = var.bots
-  location = google_cloud_run_service.bots[each.key].location
-  project  = google_cloud_run_service.bots[each.key].project
-  service  = google_cloud_run_service.bots[each.key].name
+  for_each = var.makasete_servers
+  location = google_cloud_run_service.makasete_servers[each.key].location
+  project  = google_cloud_run_service.makasete_servers[each.key].project
+  service  = google_cloud_run_service.makasete_servers[each.key].name
 
   policy_data = data.google_iam_policy.noauth.policy_data
 }
 
 output "urls" {
-  value = { for k, v in google_cloud_run_service.bots : k => v.status[0].url }
+  value = { for k, v in google_cloud_run_service.makasete_servers : k => v.status[0].url }
 }

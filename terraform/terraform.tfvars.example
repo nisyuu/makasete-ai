@@ -1,13 +1,13 @@
 project_id      = "your-project-id"
 container_image  = "asia-northeast1-docker.pkg.dev/your-project-id/makasete-ai-repo/makasete-ai:latest"
 
-bots = {
-  "bot-1" = {
+makasete_servers = {
+  "server-1" = {
     google_sheets_id   = "spreadsheet-id-1"
     gemini_api_key     = "api-key-1"
     elevenlabs_api_key = "tts-key-1"
   },
-  "bot-2" = {
+  "server-2" = {
     google_sheets_id   = "spreadsheet-id-2"
     gemini_api_key     = "api-key-2"
     elevenlabs_api_key = "tts-key-2"
