@@ -1,7 +1,7 @@
 {
   "name": "makasete-ai",
   "version": "1.0.0",
-  "description": "EC Site Embedded Voice AI Chatbot",
+  "description": "EC Site Embedded Voice AI Makasete-server",
   "engines": {
     "node": ">=24.0.0"
   },

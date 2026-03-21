@@ -144,7 +144,7 @@
   border-bottom-right-radius: 4px;
 }
 
-.message.bot {
+.message.makasete-server {
   align-self: flex-start;
   background-color: var(--white);
   color: var(--text-color);

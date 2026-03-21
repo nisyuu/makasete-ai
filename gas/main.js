@@ -35,7 +35,7 @@ function triggerDeploy() {
 }
 
 /**
- * Triggers Google Cloud Build to redeploy the bot.
+ * Triggers Google Cloud Build to redeploy the makasete-server.
  */
 function triggerCloudBuild() {
   const ui = SpreadsheetApp.getUi();

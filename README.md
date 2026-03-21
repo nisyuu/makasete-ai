@@ -1,6 +1,6 @@
 # Makasete AI
 
-Makasete AIは、スプレッドシートで管理できるAIチャットボットです。
+Makasete AIは、スプレッドシートで管理できるMakasete AI サーバーです。
 ECサイトやサービスサイトに簡単導入でき、音声とテキストの両方でユーザーと対話できます。
 
 **[📖 導入ガイド（スライド）はこちら](https://nisyuu.github.io/makasete-ai/)**
@@ -123,7 +123,7 @@ ECサイトの `</body>` タグの直前に以下のスクリプトを追加し�
 
 ## デプロイ (Google Cloud Run)
 
-Terraformを使用してデプロイします。本システムは、複数のスプレッドシート（ボット）を同時にホストすることが可能です。
+Terraformを使用してデプロイします。本システムは、複数のスプレッドシート（Makaseteサーバー）を同時にホストすることが可能です。
 
 1. **Dockerイメージのビルドとプッシュ**:
    初回のみ、手動でビルドとプッシュを行います。
@@ -131,7 +131,7 @@ Terraformを使用してデプロイします。本システムは、複数の�
    gcloud builds submit --tag asia-northeast1-docker.pkg.dev/[PROJECT_ID]/makasete-ai-repo/makasete-ai:latest
    ```
 2. **環境設定 (`terraform/terraform.tfvars`)**:
-   `terraform/terraform.tfvars.example` を参考に、ボットの設定およびGitHub連携設定を記述します。
+   `terraform/terraform.tfvars.example` を参考に、Makaseteサーバーの設定およびGitHub連携設定を記述します。
 
    ```hcl
    project_id = "your-project-id"
@@ -140,7 +140,7 @@ Terraformを使用してデプロイします。本システムは、複数の�
    github_repository    = "your-username/makasete-ai"
    github_connection_id = "your-github-connection-id" # Cloud Buildの接続ID
 
-   bots = {
+   makasete_servers = {
      # ...
    }
    ```
@@ -151,7 +151,7 @@ Terraformを使用してデプロイします。本システムは、複数の�
    terraform init
    terraform apply
    ```
-   実行後、各ボットの URL および **Cloud Build トリガーID** が出力されます。このトリガーIDを後述のGAS設定で使用します。
+   実行後、各Makaseteサーバーの URL および **Cloud Build トリガーID** が出力されます。このトリガーIDを後述のGAS設定で使用します。
 
 ## スプレッドシート連携 (GAS)
 
