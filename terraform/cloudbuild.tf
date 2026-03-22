@@ -1,7 +1,7 @@
 # 1. Cloud Build execution service account (User-managed)
 resource "google_service_account" "cloudbuild_sa" {
   account_id   = "cloudbuild-deploy-sa"
-  display_name = "Cloud Build Deploy Service Account"
+  display_name = "Makasete AI Cloud Build Deploy Service Account"
 }
 
 # 2. Grant permissions to the dedicated service account
