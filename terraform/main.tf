@@ -17,9 +17,25 @@ resource "google_artifact_registry_repository" "repo" {
   depends_on    = [google_project_service.artifactregistry]
 }
 
-# IAM: Grant access to Cloud Run Service Account (Optional: if needed for other services)
+# 1. Makasete Server execution service account
 data "google_project" "project" {}
 
+resource "google_service_account" "makasete_server_sa" {
+  account_id   = "makasete-ai-sa"
+  display_name = "Makasete AI Default compute service account"
+}
+
+resource "google_project_iam_member" "makasete_server_roles" {
+  for_each = toset([
+    "roles/logging.logWriter",
+    "roles/artifactregistry.reader"
+  ])
+  project = var.project_id
+  role    = each.key
+  member  = "serviceAccount:${google_service_account.makasete_server_sa.email}"
+}
+
+# 2. Cloud Run Service
 resource "google_cloud_run_service" "makasete_servers" {
   for_each = var.makasete_servers
   name     = "makasete-ai-${each.key}"
@@ -27,9 +43,10 @@ resource "google_cloud_run_service" "makasete_servers" {
 
   template {
     spec {
+      service_account_name = google_service_account.makasete_server_sa.email
       containers {
         image = var.container_image
-        
+
         env {
           name  = "GOOGLE_SHEETS_ID"
           value = each.value.google_sheets_id
@@ -50,7 +67,7 @@ resource "google_cloud_run_service" "makasete_servers" {
           name  = "TTS_PROVIDER"
           value = var.tts_provider
         }
-        
+
         resources {
           limits = {
             cpu    = "1000m"
