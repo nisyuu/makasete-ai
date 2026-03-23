@@ -90,11 +90,11 @@ io.use((socket, next) => {
 app.use(express.json());
 
 // Static files (Widget)
-app.use("/public", express.static(path.join(__dirname, "../../dist/public")));
+app.use("/public", express.static(path.join(__dirname, "../dist/public")));
 
 // Demo Page
 app.get("/demo", (req: Request, res: Response) => {
-  res.sendFile(path.join(__dirname, "../../dist/public/demo.html"));
+  res.sendFile(path.join(__dirname, "../dist/public/demo.html"));
 });
 
 app.get("/health", async (req: Request, res: Response) => {
