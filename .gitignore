@@ -43,7 +43,7 @@ logs
 coverage
 .nyc_output
 
-google-key.json
+service-account-key.json
 
 # Secrets
 terraform.tfvars

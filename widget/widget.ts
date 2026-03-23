@@ -4,11 +4,9 @@ interface AudioWithTimeout extends HTMLAudioElement {
   _playTimeout?: NodeJS.Timeout | null;
 }
 
-declare global {
-  interface Window {
-    SpeechRecognition?: unknown;
-    webkitSpeechRecognition?: unknown;
-  }
+interface BufferData {
+  type: "Buffer";
+  data: number[];
 }
 
 export class ChatWidget {
@@ -31,8 +29,7 @@ export class ChatWidget {
   // State
   private isRecording = false;
   private isAudioEnabled = false;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private recognition: any = null;
+  private recognition: SpeechRecognition | null = null;
   private serverUrl: string;
 
   constructor(shadowRoot: ShadowRoot, serverUrl: string) {
@@ -132,10 +129,9 @@ export class ChatWidget {
       content &&
       typeof content === "object" &&
       "data" in content &&
-      (content as { type?: string }).type === "Buffer"
+      (content as BufferData).type === "Buffer"
     ) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      rawData = new Uint8Array((content as { data: any }).data).buffer;
+      rawData = new Uint8Array((content as BufferData).data).buffer;
     } else if (content instanceof Uint8Array) {
       rawData = content.buffer;
     } else {
@@ -282,22 +278,22 @@ export class ChatWidget {
 
   private initSpeechRecognition() {
     const SpeechRecognition =
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window.SpeechRecognition || window.webkitSpeechRecognition) as any;
-    if (SpeechRecognition) {
-      this.recognition = new SpeechRecognition();
-      this.recognition.lang = "ja-JP";
-      this.recognition.continuous = false;
-      this.recognition.interimResults = false;
+      window.SpeechRecognition || window.webkitSpeechRecognition;
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      this.recognition.onresult = (event: any) => {
+    if (SpeechRecognition) {
+      const recognition = new SpeechRecognition();
+      this.recognition = recognition;
+      recognition.lang = "ja-JP";
+      recognition.continuous = false;
+      recognition.interimResults = false;
+
+      recognition.onresult = (event: SpeechRecognitionEvent) => {
         const text = event.results[0][0].transcript;
         this.input.value = text;
         this.sendMessage(true);
       };
 
-      this.recognition.onend = () => {
+      recognition.onend = () => {
         this.isRecording = false;
         this.micBtn.classList.remove("recording");
       };
