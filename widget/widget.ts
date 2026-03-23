@@ -4,6 +4,13 @@ interface AudioWithTimeout extends HTMLAudioElement {
   _playTimeout?: NodeJS.Timeout | null;
 }
 
+declare global {
+  interface Window {
+    SpeechRecognition?: unknown;
+    webkitSpeechRecognition?: unknown;
+  }
+}
+
 export class ChatWidget {
   private shadowRoot: ShadowRoot;
   private socket: Socket;
@@ -121,15 +128,14 @@ export class ChatWidget {
     let rawData: ArrayBufferLike;
     if (content instanceof ArrayBuffer) {
       rawData = content;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } else if (
       content &&
       typeof content === "object" &&
       "data" in content &&
-      (content as any).type === "Buffer"
+      (content as { type?: string }).type === "Buffer"
     ) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      rawData = new Uint8Array((content as any).data).buffer;
+      rawData = new Uint8Array((content as { data: any }).data).buffer;
     } else if (content instanceof Uint8Array) {
       rawData = content.buffer;
     } else {
@@ -275,9 +281,9 @@ export class ChatWidget {
   }
 
   private initSpeechRecognition() {
-    // @ts-expect-error: SpeechRecognition might not be in window
     const SpeechRecognition =
-      window.SpeechRecognition || window.webkitSpeechRecognition;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window.SpeechRecognition || window.webkitSpeechRecognition) as any;
     if (SpeechRecognition) {
       this.recognition = new SpeechRecognition();
       this.recognition.lang = "ja-JP";
