@@ -73,7 +73,7 @@ export class ChatWidget {
     this.waitForData();
 
     this.appendMessage(
-      "bot",
+      "makasete-server",
       "AIアシスタントです。何かお手伝いできることはありますか？",
     );
   }
@@ -99,14 +99,14 @@ export class ChatWidget {
     });
 
     this.socket.on("text-chunk", (data: { content: string }) => {
-      this.appendMessage("bot", data.content, true);
+      this.appendMessage("makasete-server", data.content, true);
     });
 
     this.socket.on(
       "audio-chunk",
       async (data: { type: "text" | "audio"; content: unknown }) => {
         if (data.type === "text") {
-          this.appendMessage("bot", data.content as string, true);
+          this.appendMessage("makasete-server", data.content as string, true);
         } else if (data.type === "audio") {
           this.handleAudioChunk(data.content);
         }
@@ -115,7 +115,7 @@ export class ChatWidget {
 
     this.socket.on("error", (data: { message: string }) => {
       console.error("[MakaseteAI] Server error:", data.message);
-      this.appendMessage("bot", `エラーが発生しました: ${data.message}`);
+      this.appendMessage("makasete-server", `エラーが発生しました: ${data.message}`);
     });
   }
 
@@ -278,7 +278,8 @@ export class ChatWidget {
 
   private initSpeechRecognition() {
     const SpeechRecognition =
-      window.SpeechRecognition || window.webkitSpeechRecognition;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window.SpeechRecognition || window.webkitSpeechRecognition) as any;
     if (SpeechRecognition) {
       this.recognition = new SpeechRecognition();
       this.recognition.lang = "ja-JP";
@@ -313,14 +314,14 @@ export class ChatWidget {
     }
   }
 
-  private currentBotMessageRaw: string = "";
+  private currentMakaseteServerMessageRaw: string = "";
 
   private appendMessage(
-    role: "user" | "bot",
+    role: "user" | "makasete-server",
     text: string,
     appendToLast = false,
   ) {
-    if (role === "bot") {
+    if (role === "makasete-server") {
       this.hideTypingIndicator();
     }
 
@@ -365,18 +366,18 @@ export class ChatWidget {
       );
     };
 
-    if (appendToLast && role === "bot") {
+    if (appendToLast && role === "makasete-server") {
       const lastMsg = this.timeline.lastElementChild;
-      if (lastMsg && lastMsg.classList.contains("bot")) {
-        this.currentBotMessageRaw += text;
-        lastMsg.innerHTML = formatText(this.currentBotMessageRaw);
+      if (lastMsg && lastMsg.classList.contains("makasete-server")) {
+        this.currentMakaseteServerMessageRaw += text;
+        lastMsg.innerHTML = formatText(this.currentMakaseteServerMessageRaw);
         this.scrollToBottom();
         return;
       }
     }
 
-    if (role === "bot") {
-      this.currentBotMessageRaw = text;
+    if (role === "makasete-server") {
+      this.currentMakaseteServerMessageRaw = text;
     }
 
     const div = document.createElement("div");

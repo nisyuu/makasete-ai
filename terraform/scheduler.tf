@@ -12,19 +12,19 @@ resource "google_project_service" "scheduler" {
 # 1. Workflow サービスアカウント
 resource "google_service_account" "workflow_sa" {
   account_id   = "cloud-run-scaler-sa"
-  display_name = "Cloud Run Scaler Workflow Service Account"
+  display_name = "Makasete AI Cloud Run Scaler Workflow Service Account"
 }
 
 resource "google_project_iam_member" "workflow_run_admin" {
   project = var.project_id
   role    = "roles/run.developer"
-  member    = "serviceAccount:${google_service_account.workflow_sa.email}"
+  member  = "serviceAccount:${google_service_account.workflow_sa.email}"
 }
 
 resource "google_project_iam_member" "workflow_logging" {
   project = var.project_id
   role    = "roles/logging.logWriter"
-  member    = "serviceAccount:${google_service_account.workflow_sa.email}"
+  member  = "serviceAccount:${google_service_account.workflow_sa.email}"
 }
 
 # 2. Workflow
@@ -70,7 +70,7 @@ EOF
 # 3. Scheduler サービスアカウント
 resource "google_service_account" "scheduler_sa" {
   account_id   = "workflow-scheduler-sa"
-  display_name = "Cloud Scheduler Workflow Invoker SA"
+  display_name = "Makasete AI Cloud Scheduler Workflow Invoker Service Account"
 }
 
 resource "google_project_iam_member" "scheduler_workflow_invoker" {
@@ -79,22 +79,22 @@ resource "google_project_iam_member" "scheduler_workflow_invoker" {
   member  = "serviceAccount:${google_service_account.scheduler_sa.email}"
 }
 
-# 4. 09:00 START (min=1) for each bot
+# 4. 09:00 START (min=1) for each Makasete-server
 resource "google_cloud_scheduler_job" "start_job" {
-  for_each         = var.bots
-  name             = "start-bot-${each.key}"
-  description      = "Set min-instances to 1 at 9 AM JST for ${each.key}"
-  schedule         = "0 9 * * *"
-  time_zone        = "Asia/Tokyo"
-  region           = var.region
+  for_each    = var.makasete_servers
+  name        = "start-makasete-server-${each.key}"
+  description = "Set min-instances to 1 at 9 AM JST for ${each.key}"
+  schedule    = "0 9 * * *"
+  time_zone   = "Asia/Tokyo"
+  region      = var.region
 
   http_target {
     http_method = "POST"
     uri         = "https://workflowexecutions.googleapis.com/v1/${google_workflows_workflow.scale_workflow.id}/executions"
-    body        = base64encode(jsonencode({
+    body = base64encode(jsonencode({
       argument = jsonencode({
         min_instances = "1"
-        service_name  = google_cloud_run_service.bots[each.key].name
+        service_name  = google_cloud_run_service.makasete_servers[each.key].name
         location      = var.region
       })
     }))
@@ -104,22 +104,22 @@ resource "google_cloud_scheduler_job" "start_job" {
   }
 }
 
-# 5. 21:00 STOP (min=0) for each bot
+# 5. 21:00 STOP (min=0) for each Makasete-server
 resource "google_cloud_scheduler_job" "stop_job" {
-  for_each         = var.bots
-  name             = "stop-bot-${each.key}"
-  description      = "Set min-instances to 0 at 9 PM JST for ${each.key}"
-  schedule         = "0 21 * * *"
-  time_zone        = "Asia/Tokyo"
-  region           = var.region
+  for_each    = var.makasete_servers
+  name        = "stop-makasete-server-${each.key}"
+  description = "Set min-instances to 0 at 9 PM JST for ${each.key}"
+  schedule    = "0 21 * * *"
+  time_zone   = "Asia/Tokyo"
+  region      = var.region
 
   http_target {
     http_method = "POST"
     uri         = "https://workflowexecutions.googleapis.com/v1/${google_workflows_workflow.scale_workflow.id}/executions"
-    body        = base64encode(jsonencode({
+    body = base64encode(jsonencode({
       argument = jsonencode({
         min_instances = "0"
-        service_name  = google_cloud_run_service.bots[each.key].name
+        service_name  = google_cloud_run_service.makasete_servers[each.key].name
         location      = var.region
       })
     }))

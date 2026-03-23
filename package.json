@@ -1,7 +1,7 @@
 {
   "name": "makasete-ai",
   "version": "1.0.0",
-  "description": "EC Site Embedded Voice AI Chatbot",
+  "description": "EC Site Embedded Voice AI Makasete Server",
   "engines": {
     "node": ">=24.0.0"
   },
@@ -17,12 +17,12 @@
     "typecheck": "tsc -p server --noEmit && tsc -p widget"
   },
   "dependencies": {
-    "@elevenlabs/elevenlabs-js": "^2.37.0",
+    "@elevenlabs/elevenlabs-js": "^2.39.0",
     "@google/generative-ai": "^0.24.1",
     "cors": "^2.8.6",
     "dotenv": "^16.6.1",
     "express": "^5.2.1",
-    "express-rate-limit": "^8.2.1",
+    "express-rate-limit": "^8.3.1",
     "googleapis": "^128.0.0",
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3"
@@ -35,11 +35,11 @@
     "@types/express": "^5.0.6",
     "@types/node": "^20.19.35",
     "@typescript-eslint/eslint-plugin": "^8.56.1",
-    "@typescript-eslint/parser": "^8.56.1",
+    "@typescript-eslint/parser": "^8.57.1",
     "concurrently": "^9.2.1",
     "esbuild": "0.25.0",
     "eslint": "^10.0.2",
-    "globals": "^16.5.0",
+    "globals": "^17.4.0",
     "nodemon": "^3.1.14",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3",

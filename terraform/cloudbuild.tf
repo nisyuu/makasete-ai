@@ -1,7 +1,7 @@
 # 1. Cloud Build execution service account (User-managed)
 resource "google_service_account" "cloudbuild_sa" {
   account_id   = "cloudbuild-deploy-sa"
-  display_name = "Cloud Build Deploy Service Account"
+  display_name = "Makasete AI Cloud Build Deploy Service Account"
 }
 
 # 2. Grant permissions to the dedicated service account
@@ -24,9 +24,9 @@ resource "google_service_account_iam_member" "cloudbuild_service_agent_user" {
   member             = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-cloudbuild.iam.gserviceaccount.com"
 }
 
-# 4. Create a dedicated Cloud Build Trigger for EACH bot
-resource "google_cloudbuild_trigger" "bot_deploy" {
-  for_each    = var.bots
+# 4. Create a dedicated Cloud Build Trigger for EACH Makasete-server
+resource "google_cloudbuild_trigger" "makasete_server_deploy" {
+  for_each    = var.makasete_servers
   name        = "makasete-ai-deploy-${each.key}"
   description = "Manual build trigger for ${each.key} (Invoked via GAS)"
   location    = "global"
@@ -41,7 +41,7 @@ resource "google_cloudbuild_trigger" "bot_deploy" {
 
   filename = "cloudbuild.yaml"
 
-  # Pass the specific service name for this bot as a substitution
+  # Pass the specific service name for this Makasete-server as a substitution
   substitutions = {
     _SERVICE_NAME = "makasete-ai-${each.key}"
   }
@@ -59,8 +59,8 @@ resource "google_project_service" "cloudbuild" {
   disable_on_destroy = false
 }
 
-# Output a map of bot names to their trigger IDs
+# Output a map of Makasete-server names to their trigger IDs
 output "cloudbuild_trigger_ids" {
-  value       = { for k, v in google_cloudbuild_trigger.bot_deploy : k => v.trigger_id }
-  description = "The IDs of the Cloud Build triggers for each bot"
+  value       = { for k, v in google_cloudbuild_trigger.makasete_server_deploy : k => v.trigger_id }
+  description = "The IDs of the Cloud Build triggers for each Makasete-server"
 }

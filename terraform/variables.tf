@@ -14,13 +14,13 @@ variable "container_image" {
   type        = string
 }
 
-variable "bots" {
+variable "makasete_servers" {
   type = map(object({
-    google_sheets_id = string
-    gemini_api_key   = string
+    google_sheets_id   = string
+    gemini_api_key     = string
     elevenlabs_api_key = string
   }))
-  description = "Map of bot configurations. The key will be used as the service name suffix."
+  description = "Map of Makasete-server configurations. The key will be used as the service name suffix."
 }
 
 variable "allowed_origins" {
