@@ -21,7 +21,7 @@ ECサイトやサービスサイトに簡単導入でき、音声とテキスト
 
 - **技術スタック**: Vanilla TypeScript, Web Components (Shadow DOM), CSS, Vite
 - **音声認識**: Web Speech API を使用。
-- **音声再生**: MP3 Blobの逐次再生方式を使用。
+- **音声再生**: **Web Audio API** を使用。デコード済みのオーディオバッファを直接再生することで、ブラウザ特有の冒頭の音欠け（クリッピング）を防止し、低遅延な再生を実現。
 - **通信**: Socket.io を使用した双方向通信。
 
 ### バックエンド (Server)

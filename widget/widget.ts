@@ -1,9 +1,5 @@
 import { io, Socket } from "socket.io-client";
 
-interface AudioWithTimeout extends HTMLAudioElement {
-  _playTimeout?: NodeJS.Timeout | null;
-}
-
 interface BufferData {
   type: "Buffer";
   data: number[];
@@ -12,9 +8,13 @@ interface BufferData {
 export class ChatWidget {
   private shadowRoot: ShadowRoot;
   private socket: Socket;
-  private audioQueue: Blob[] = [];
+  private audioQueue: ArrayBuffer[] = [];
   private isPlaying = false;
-  private audio: AudioWithTimeout;
+
+  // Web Audio API
+  private audioContext: AudioContext | null = null;
+  private currentSource: AudioBufferSourceNode | null = null;
+  private gainNode: GainNode | null = null;
 
   // UI Elements
   private chatWindow: HTMLElement;
@@ -63,9 +63,6 @@ export class ChatWidget {
       ".loading-overlay",
     ) as HTMLElement;
 
-    this.audio = new Audio();
-    this.audio.addEventListener("ended", () => this.onAudioEnded());
-
     this.initSocket();
     this.bindEvents();
     this.initSpeechRecognition();
@@ -76,6 +73,27 @@ export class ChatWidget {
       "makasete-server",
       "AIアシスタントです。何かお手伝いできることはありますか？",
     );
+  }
+
+  private initAudioContext() {
+    if (this.audioContext) return;
+
+    try {
+      // @ts-expect-error: webkitAudioContext is for older browsers
+      const ContextClass = window.AudioContext || window.webkitAudioContext;
+      this.audioContext = new ContextClass();
+      this.gainNode = this.audioContext.createGain();
+      this.gainNode.connect(this.audioContext.destination);
+    } catch (e) {
+      console.error("[MakaseteAI] Failed to initialize AudioContext:", e);
+    }
+  }
+
+  private async resumeAudioContext() {
+    this.initAudioContext();
+    if (this.audioContext && this.audioContext.state === "suspended") {
+      await this.audioContext.resume();
+    }
   }
 
   private async waitForData() {
@@ -115,14 +133,17 @@ export class ChatWidget {
 
     this.socket.on("error", (data: { message: string }) => {
       console.error("[MakaseteAI] Server error:", data.message);
-      this.appendMessage("makasete-server", `エラーが発生しました: ${data.message}`);
+      this.appendMessage(
+        "makasete-server",
+        `エラーが発生しました: ${data.message}`,
+      );
     });
   }
 
   private handleAudioChunk(content: unknown) {
     if (!this.isAudioEnabled) return;
 
-    let rawData: ArrayBufferLike;
+    let rawData: ArrayBuffer;
     if (content instanceof ArrayBuffer) {
       rawData = content;
     } else if (
@@ -133,73 +154,67 @@ export class ChatWidget {
     ) {
       rawData = new Uint8Array((content as BufferData).data).buffer;
     } else if (content instanceof Uint8Array) {
-      rawData = content.buffer;
+      rawData = content.buffer as ArrayBuffer;
     } else {
       console.warn("[MakaseteAI] Unexpected audio format");
       return;
     }
 
-    const blob = new Blob([rawData as ArrayBuffer], { type: "audio/mpeg" });
-    this.audioQueue.push(blob);
+    this.audioQueue.push(rawData);
     this.playNextInQueue();
   }
 
-  private playNextInQueue() {
+  private async playNextInQueue() {
     if (this.isPlaying || this.audioQueue.length === 0) return;
+    if (!this.audioContext) this.initAudioContext();
+    if (!this.audioContext) return;
 
     this.isPlaying = true;
-    const nextBlob = this.audioQueue.shift();
-    if (nextBlob) {
-      if (this.audio.src) {
-        URL.revokeObjectURL(this.audio.src);
+    const rawData = this.audioQueue.shift();
+
+    if (rawData) {
+      try {
+        // decodeAudioData consumes the buffer, so we pass a slice/copy
+        const audioBuffer = await this.audioContext.decodeAudioData(
+          rawData.slice(0),
+        );
+
+        const source = this.audioContext.createBufferSource();
+        source.buffer = audioBuffer;
+        if (this.gainNode) source.connect(this.gainNode);
+
+        this.currentSource = source;
+
+        source.onended = () => {
+          if (this.currentSource === source) {
+            this.currentSource = null;
+            this.isPlaying = false;
+            this.playNextInQueue();
+          }
+        };
+
+        source.start(0);
+      } catch (e) {
+        console.error("[MakaseteAI] Audio decode/play failed:", e);
+        this.isPlaying = false;
+        this.playNextInQueue();
       }
-      this.audio.src = URL.createObjectURL(nextBlob);
-
-      // Safety timeout: If audio doesn't start/end within 15s, force next
-      const timeout = setTimeout(() => {
-        if (this.isPlaying) {
-          console.warn("[MakaseteAI] Audio playback timed out");
-          this.onAudioEnded();
-        }
-      }, 15000);
-
-      this.audio
-        .play()
-        .then(() => {
-          // Play started
-        })
-        .catch((e) => {
-          console.warn("[MakaseteAI] Play failed:", e);
-          clearTimeout(timeout);
-          this.onAudioEnded();
-        });
-
-      // Store timeout ID to clear it when audio actually ends
-      this.audio._playTimeout = timeout;
+    } else {
+      this.isPlaying = false;
     }
-  }
-
-  private onAudioEnded() {
-    if (this.audio._playTimeout) {
-      clearTimeout(this.audio._playTimeout);
-      this.audio._playTimeout = null;
-    }
-    this.isPlaying = false;
-    this.playNextInQueue();
   }
 
   private resetAudioState() {
-    this.audio.pause();
+    if (this.currentSource) {
+      try {
+        this.currentSource.stop();
+      } catch {
+        // Source might already be stopped
+      }
+      this.currentSource = null;
+    }
     this.isPlaying = false;
     this.audioQueue = [];
-    if (this.audio.src) {
-      URL.revokeObjectURL(this.audio.src);
-      this.audio.src = "";
-    }
-    if (this.audio._playTimeout) {
-      clearTimeout(this.audio._playTimeout);
-      this.audio._playTimeout = null;
-    }
   }
 
   private sendMessage(isVoice = false) {
@@ -213,8 +228,7 @@ export class ChatWidget {
 
     if (useAudio) {
       this.resetAudioState();
-      // Unlock audio element
-      this.audio.play().catch(() => {});
+      this.resumeAudioContext().catch(console.error);
     }
 
     this.socket.emit("user-input", {
@@ -227,22 +241,29 @@ export class ChatWidget {
     this.launcherBtn.addEventListener("click", () => {
       const isOpen = this.chatWindow.classList.toggle("open");
       if (isOpen) {
-        this.audio.play().catch(() => {});
+        this.resumeAudioContext().catch(console.error);
       } else {
         this.resetAudioState();
       }
     });
 
-    this.sendBtn.addEventListener("click", () => this.sendMessage());
+    this.sendBtn.addEventListener("click", () => {
+      this.resumeAudioContext().catch(console.error);
+      this.sendMessage();
+    });
 
     this.input.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
+        this.resumeAudioContext().catch(console.error);
         this.sendMessage();
       }
     });
 
-    this.micBtn.addEventListener("click", () => this.toggleRecording());
+    this.micBtn.addEventListener("click", () => {
+      this.resumeAudioContext().catch(console.error);
+      this.toggleRecording();
+    });
 
     const closeBtn = this.shadowRoot.querySelector(".close-btn");
     if (closeBtn) {
@@ -259,7 +280,7 @@ export class ChatWidget {
 
       this.resetAudioState();
       if (this.isAudioEnabled) {
-        this.audio.play().catch(() => {});
+        this.resumeAudioContext().catch(console.error);
       }
     });
   }
@@ -293,6 +314,7 @@ export class ChatWidget {
       recognition.onresult = (event: SpeechRecognitionEvent) => {
         const text = event.results[0][0].transcript;
         this.input.value = text;
+        this.resumeAudioContext().catch(console.error);
         this.sendMessage(true);
       };
 
