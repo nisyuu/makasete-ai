@@ -4,6 +4,11 @@ interface AudioWithTimeout extends HTMLAudioElement {
   _playTimeout?: NodeJS.Timeout | null;
 }
 
+interface BufferData {
+  type: "Buffer";
+  data: number[];
+}
+
 export class ChatWidget {
   private shadowRoot: ShadowRoot;
   private socket: Socket;
@@ -24,8 +29,7 @@ export class ChatWidget {
   // State
   private isRecording = false;
   private isAudioEnabled = false;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private recognition: any = null;
+  private recognition: SpeechRecognition | null = null;
   private serverUrl: string;
 
   constructor(shadowRoot: ShadowRoot, serverUrl: string) {
@@ -121,15 +125,13 @@ export class ChatWidget {
     let rawData: ArrayBufferLike;
     if (content instanceof ArrayBuffer) {
       rawData = content;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } else if (
       content &&
       typeof content === "object" &&
       "data" in content &&
-      (content as any).type === "Buffer"
+      (content as BufferData).type === "Buffer"
     ) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      rawData = new Uint8Array((content as any).data).buffer;
+      rawData = new Uint8Array((content as BufferData).data).buffer;
     } else if (content instanceof Uint8Array) {
       rawData = content.buffer;
     } else {
@@ -275,7 +277,6 @@ export class ChatWidget {
   }
 
   private initSpeechRecognition() {
-    // @ts-expect-error: SpeechRecognition might not be in window
     const SpeechRecognition =
       window.SpeechRecognition || window.webkitSpeechRecognition;
     if (SpeechRecognition) {
@@ -284,8 +285,7 @@ export class ChatWidget {
       this.recognition.continuous = false;
       this.recognition.interimResults = false;
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      this.recognition.onresult = (event: any) => {
+      this.recognition.onresult = (event: SpeechRecognitionEvent) => {
         const text = event.results[0][0].transcript;
         this.input.value = text;
         this.sendMessage(true);
