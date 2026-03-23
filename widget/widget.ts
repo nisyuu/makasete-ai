@@ -278,21 +278,22 @@ export class ChatWidget {
 
   private initSpeechRecognition() {
     const SpeechRecognition =
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window.SpeechRecognition || window.webkitSpeechRecognition) as any;
-    if (SpeechRecognition) {
-      this.recognition = new SpeechRecognition();
-      this.recognition.lang = "ja-JP";
-      this.recognition.continuous = false;
-      this.recognition.interimResults = false;
+      window.SpeechRecognition || window.webkitSpeechRecognition;
 
-      this.recognition.onresult = (event: SpeechRecognitionEvent) => {
+    if (SpeechRecognition) {
+      const recognition = new SpeechRecognition();
+      this.recognition = recognition;
+      recognition.lang = "ja-JP";
+      recognition.continuous = false;
+      recognition.interimResults = false;
+
+      recognition.onresult = (event: SpeechRecognitionEvent) => {
         const text = event.results[0][0].transcript;
         this.input.value = text;
         this.sendMessage(true);
       };
 
-      this.recognition.onend = () => {
+      recognition.onend = () => {
         this.isRecording = false;
         this.micBtn.classList.remove("recording");
       };
