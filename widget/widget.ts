@@ -228,6 +228,8 @@ export class ChatWidget {
       const isOpen = this.chatWindow.classList.toggle("open");
       if (isOpen) {
         this.audio.play().catch(() => {});
+      } else {
+        this.resetAudioState();
       }
     });
 
@@ -246,6 +248,7 @@ export class ChatWidget {
     if (closeBtn) {
       closeBtn.addEventListener("click", () => {
         this.chatWindow.classList.remove("open");
+        this.resetAudioState();
       });
     }
 
