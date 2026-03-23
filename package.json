@@ -17,7 +17,7 @@
     "typecheck": "tsc -p server --noEmit && tsc -p widget"
   },
   "dependencies": {
-    "@elevenlabs/elevenlabs-js": "^2.37.0",
+    "@elevenlabs/elevenlabs-js": "^2.39.0",
     "@google/generative-ai": "^0.24.1",
     "cors": "^2.8.6",
     "dotenv": "^16.6.1",
