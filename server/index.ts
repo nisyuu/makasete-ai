@@ -222,20 +222,17 @@ async function processSentence(
     try {
       // 2. Prepare text for TTS
       let ttsInput: string;
-
       if (hasTags(sentence)) {
-        // If it contains tags, ensure it's a valid SSML document by wrapping in <speak>
-        // First remove any split-off fragments of <speak> to avoid nesting
+        // Ensure it's a valid SSML document and clean it up
         const innerText = sentence.replace(/<\/?speak>/g, "").trim();
-        // Basic cleanup for SSML content (keep tags but remove Markdown links)
         ttsInput = `<speak>${removeMarkdownLinks(innerText)}</speak>`;
       } else {
-        // Otherwise, perform standard cleanup for plain text
+        // Plain text handling
         ttsInput = cleanupForTTS(sentence);
       }
 
-      // Skip if no actual text to read (stripping tags reveals empty content)
-      if (!stripTags(ttsInput).trim()) return;
+      // Skip if no actual text to read
+      if (!ttsInput.trim() || !stripTags(ttsInput).trim()) return;
 
       const audioStream: NodeJS.ReadableStream =
         await ttsService.generateSpeechStream(ttsInput);
