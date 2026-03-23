@@ -81,7 +81,7 @@ export async function fetchAllSheets(): Promise<void> {
 
         const sheetNames = spreadsheet.data.sheets
             ?.map(s => s.properties?.title)
-            .filter((name): name is string => !!name) || [];
+            .filter((name): name is string => !!name && !name.toLowerCase().startsWith('wip')) || [];
 
         const newCache = new Map<string, SheetData[]>();
 

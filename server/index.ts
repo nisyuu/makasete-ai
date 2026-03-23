@@ -10,7 +10,7 @@ import { generateResponseStream } from './services/gemini';
 import { getTTSService } from './services/tts/factory';
 import { TTSService } from './services/tts/types';
 import { StreamBuffer } from './utils/streamBuffer';
-import { stripTags, cleanupForTTS, isSsml, hasTags, removeMarkdownLinks } from './utils/text';
+import { stripTags, cleanupForTTS, hasTags, removeMarkdownLinks } from './utils/text';
 
 const app = express();
 
