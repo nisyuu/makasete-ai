@@ -1,22 +1,26 @@
 version: 2
 updates:
-  # Maintain dependencies for GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
     target-branch: "develop"
+    open-pull-requests-limit: 20
     schedule:
       interval: "weekly"
-
-  # Maintain dependencies for Node.js (pnpm)
+      time: "09:00"
+      timezone: "Asia/Tokyo"
   - package-ecosystem: "npm"
     directory: "/"
     target-branch: "develop"
+    open-pull-requests-limit: 20
     schedule:
       interval: "weekly"
-
-  # Maintain dependencies for Terraform
+      time: "09:00"
+      timezone: "Asia/Tokyo"
   - package-ecosystem: "terraform"
     directory: "/terraform"
     target-branch: "develop"
+    open-pull-requests-limit: 20
     schedule:
       interval: "weekly"
+      time: "09:00"
+      timezone: "Asia/Tokyo"
