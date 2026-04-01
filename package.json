@@ -34,7 +34,7 @@
     "@types/dom-speech-recognition": "^0.0.9",
     "@types/express": "^5.0.6",
     "@types/node": "^20.19.35",
-    "@typescript-eslint/eslint-plugin": "^8.56.1",
+    "@typescript-eslint/eslint-plugin": "^8.57.2",
     "@typescript-eslint/parser": "^8.57.2",
     "concurrently": "^9.2.1",
     "esbuild": "0.27.4",
