@@ -1,4 +1,5 @@
 import { io, Socket } from "socket.io-client";
+import { normalizeSettingKey, formatMessageText } from "./utils/text";
 
 interface BufferData {
   type: "Buffer";
@@ -190,13 +191,10 @@ export class ChatWidget {
         const settingsData = await settingsResponse.json();
         
         if (settingsData && Array.isArray(settingsData) && settingsData.length > 0) {
-          // Normalizer for keys to handle various input styles
-          const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
-
           // Check if it's key-value format (has 'key' and 'value' properties)
           if ("key" in settingsData[0] && "value" in settingsData[0]) {
             for (const row of settingsData) {
-              const k = normalize(row.key);
+              const k = normalizeSettingKey(row.key);
               if (k === "chattitle" || k === "title") title = row.value;
               if (k === "initialmessage" || k === "greeting") initialMsg = row.value;
               if (k === "primarycolor" || k === "color") primaryColor = row.value;
@@ -463,52 +461,11 @@ export class ChatWidget {
       this.hideTypingIndicator();
     }
 
-    const formatText = (rawText: string) => {
-      // 1. Escape HTML to prevent basic XSS
-      const escapeHtml = (str: string) => {
-        return str.replace(
-          /[&<>"']/g,
-          (m) =>
-            ({
-              "&": "&amp;",
-              "<": "&lt;",
-              ">": "&gt;",
-              '"': "&quot;",
-              "'": "&#39;",
-            })[m] || m,
-        );
-      };
-
-      // 2. Safe URL check for Markdown links
-      // Only allow http, https, and relative paths. Block javascript:, etc.
-      const sanitizeUrl = (url: string) => {
-        const trimmed = url.trim();
-        if (/^(https?:\/\/|\/)/i.test(trimmed)) {
-          return trimmed;
-        }
-        return "#";
-      };
-
-      // First, escape the entire text
-      const escapedText = escapeHtml(rawText);
-
-      // Then, selectively allow Markdown links [text](url)
-      // Note: We use a regex that matches the escaped brackets/parens if necessary,
-      // but since we escaped the whole text first, we need to match the literal chars.
-      return escapedText.replace(
-        /\[((?:[^[\]]|\[[^\]]*\])+)\]\(([^)]+)\)/g,
-        (_match, linkText, url) => {
-          const safeUrl = sanitizeUrl(url);
-          return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${linkText}</a>`;
-        },
-      );
-    };
-
     if (appendToLast && role === "makasete-server") {
       const lastMsg = this.timeline.lastElementChild;
       if (lastMsg && lastMsg.classList.contains("makasete-server")) {
         this.currentMakaseteServerMessageRaw += text;
-        lastMsg.innerHTML = formatText(this.currentMakaseteServerMessageRaw);
+        lastMsg.innerHTML = formatMessageText(this.currentMakaseteServerMessageRaw);
         this.scrollToBottom();
         return;
       }
@@ -520,7 +477,7 @@ export class ChatWidget {
 
     const div = document.createElement("div");
     div.className = `message ${role}`;
-    div.innerHTML = formatText(text);
+    div.innerHTML = formatMessageText(text);
     this.timeline.appendChild(div);
     this.scrollToBottom();
   }
