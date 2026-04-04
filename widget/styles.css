@@ -354,11 +354,16 @@
     top: 0;
     left: 0;
     width: 100vw;
-    height: 100vh;
+    height: 100vh; /* Fallback */
+    height: 100dvh;
     border-radius: 0;
     bottom: 0;
     right: 0;
     transform: none;
+  }
+
+  .widget-footer {
+    padding-bottom: calc(8px + env(safe-area-inset-bottom));
   }
 
   .chat-header {
