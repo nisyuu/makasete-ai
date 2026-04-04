@@ -19,6 +19,7 @@ export class ChatWidget {
   // UI Elements
   private container: HTMLElement;
   private chatWindow: HTMLElement;
+  private chatTitle: HTMLElement;
   private timeline: HTMLElement;
   private input: HTMLTextAreaElement;
   private sendBtn: HTMLButtonElement;
@@ -51,6 +52,9 @@ export class ChatWidget {
     this.chatWindow = this.shadowRoot.querySelector(
       ".chat-window",
     ) as HTMLElement;
+    this.chatTitle = this.shadowRoot.querySelector(
+      ".chat-title",
+    ) as HTMLElement;
     this.timeline = this.shadowRoot.querySelector(
       ".chat-timeline",
     ) as HTMLElement;
@@ -75,11 +79,6 @@ export class ChatWidget {
     this.initSpeechRecognition();
     this.initDragging();
     this.waitForData();
-
-    this.appendMessage(
-      "makasete-server",
-      "AIアシスタントです。何かお手伝いできることはありますか？",
-    );
   }
 
   private initDragging() {
@@ -174,17 +173,57 @@ export class ChatWidget {
   }
 
   private async waitForData() {
+    let title = "AIアシスタント";
+    let initialMsg = "AIアシスタントです。何かお手伝いできることはありますか？";
+    let primaryColor = "";
+
     try {
-      // This endpoint now blocks until data is fetched from Sheets on the server
-      const response = await fetch(`${this.serverUrl}/health`);
-      if (response.ok) {
-        this.loadingOverlay.classList.add("hidden");
-      } else {
+      // This endpoint blocks until data is fetched from Sheets on the server
+      const healthResponse = await fetch(`${this.serverUrl}/health`);
+      if (!healthResponse.ok) {
         console.warn("[MakaseteAI] Failed to verify data readiness");
-        // Optional: show error in overlay
+      }
+
+      // Try to fetch settings
+      const settingsResponse = await fetch(`${this.serverUrl}/api/settings`);
+      if (settingsResponse.ok) {
+        const settingsData = await settingsResponse.json();
+        
+        if (settingsData && Array.isArray(settingsData) && settingsData.length > 0) {
+          // Normalizer for keys to handle various input styles
+          const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+          // Check if it's key-value format (has 'key' and 'value' properties)
+          if ("key" in settingsData[0] && "value" in settingsData[0]) {
+            for (const row of settingsData) {
+              const k = normalize(row.key);
+              if (k === "chattitle" || k === "title") title = row.value;
+              if (k === "initialmessage" || k === "greeting") initialMsg = row.value;
+              if (k === "primarycolor" || k === "color") primaryColor = row.value;
+            }
+          } else {
+            // Assume row format (single row with columns as properties)
+            const row = settingsData[0];
+            // Headers are already snake_cased by the server
+            if (row.chat_title || row.title) title = row.chat_title || row.title;
+            if (row.initial_message || row.greeting) initialMsg = row.initial_message || row.greeting;
+            if (row.primary_color || row.color) primaryColor = row.primary_color || row.color;
+          }
+        }
       }
     } catch (e) {
-      console.error("[MakaseteAI] Error waiting for data:", e);
+      console.error("[MakaseteAI] Error fetching initial data/settings:", e);
+    } finally {
+      this.chatTitle.textContent = title;
+      this.appendMessage("makasete-server", initialMsg);
+      
+      if (primaryColor) {
+          // Apply dynamic primary color to the shadow host
+          const host = this.shadowRoot.host as HTMLElement;
+          host.style.setProperty('--primary-color', primaryColor);
+      }
+
+      this.loadingOverlay.classList.add("hidden");
     }
   }
 

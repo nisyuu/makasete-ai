@@ -20,7 +20,7 @@ import { ChatWidget } from "./widget";
   container.innerHTML = `
         <div class="chat-window">
              <div class="chat-header">
-                <span>AIアシスタント</span>
+                <span class="chat-title">AIアシスタント</span>
                 <div class="header-controls">
                     <button class="close-btn" title="閉じる">
                         <svg class="lucide lucide-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
