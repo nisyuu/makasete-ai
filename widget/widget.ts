@@ -17,6 +17,7 @@ export class ChatWidget {
   private gainNode: GainNode | null = null;
 
   // UI Elements
+  private container: HTMLElement;
   private chatWindow: HTMLElement;
   private timeline: HTMLElement;
   private input: HTMLTextAreaElement;
@@ -32,12 +33,22 @@ export class ChatWidget {
   private recognition: SpeechRecognition | null = null;
   private serverUrl: string;
 
+  // Dragging state
+  private isDragging = false;
+  private dragStartX = 0;
+  private dragStartY = 0;
+  private containerPosX = 0;
+  private containerPosY = 0;
+
   constructor(shadowRoot: ShadowRoot, serverUrl: string) {
     this.shadowRoot = shadowRoot;
     this.serverUrl = serverUrl;
     this.socket = io(serverUrl);
 
     // Element binding
+    this.container = this.shadowRoot.querySelector(
+      ".widget-container",
+    ) as HTMLElement;
     this.chatWindow = this.shadowRoot.querySelector(
       ".chat-window",
     ) as HTMLElement;
@@ -66,6 +77,7 @@ export class ChatWidget {
     this.initSocket();
     this.bindEvents();
     this.initSpeechRecognition();
+    this.initDragging();
     this.updateAudioToggleUI();
     this.waitForData();
 
@@ -73,6 +85,76 @@ export class ChatWidget {
       "makasete-server",
       "AIアシスタントです。何かお手伝いできることはありますか？",
     );
+  }
+
+  private initDragging() {
+    const header = this.shadowRoot.querySelector(".chat-header") as HTMLElement;
+    const handles = [this.launcherBtn, header];
+
+    const onMouseDown = (e: MouseEvent | TouchEvent) => {
+      // Disable dragging on small screens (mobile)
+      if (window.innerWidth <= 600) return;
+
+      // Don't drag if clicking buttons inside header/launcher
+      const target = e.target as HTMLElement;
+      if (
+        target.closest("button") &&
+        target.closest("button") !== this.launcherBtn
+      )
+        return;
+
+      this.isDragging = false; // Reset on start
+      const clientX = e instanceof MouseEvent ? e.clientX : e.touches[0].clientX;
+      const clientY = e instanceof MouseEvent ? e.clientY : e.touches[0].clientY;
+
+      this.dragStartX = clientX;
+      this.dragStartY = clientY;
+
+      const rect = this.container.getBoundingClientRect();
+      this.containerPosX = rect.left;
+      this.containerPosY = rect.top;
+
+      const onMouseMove = (moveEv: MouseEvent | TouchEvent) => {
+        const moveX =
+          moveEv instanceof MouseEvent ? moveEv.clientX : moveEv.touches[0].clientX;
+        const moveY =
+          moveEv instanceof MouseEvent ? moveEv.clientY : moveEv.touches[0].clientY;
+
+        const deltaX = moveX - this.dragStartX;
+        const deltaY = moveY - this.dragStartY;
+
+        if (!this.isDragging && (Math.abs(deltaX) > 5 || Math.abs(deltaY) > 5)) {
+          this.isDragging = true;
+          // When drag starts, switch to top/left and remove bottom/right constraints
+          this.container.style.bottom = "auto";
+          this.container.style.right = "auto";
+        }
+
+        if (this.isDragging) {
+          this.container.style.left = `${this.containerPosX + deltaX}px`;
+          this.container.style.top = `${this.containerPosY + deltaY}px`;
+        }
+      };
+
+      const onMouseUp = () => {
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("mouseup", onMouseUp);
+        document.removeEventListener("touchmove", onMouseMove);
+        document.removeEventListener("touchend", onMouseUp);
+
+        // Optional: snap to viewport edges if needed
+      };
+
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", onMouseUp);
+      document.addEventListener("touchmove", onMouseMove);
+      document.addEventListener("touchend", onMouseUp);
+    };
+
+    handles.forEach((handle) => {
+      handle.addEventListener("mousedown", onMouseDown);
+      handle.addEventListener("touchstart", onMouseDown, { passive: true });
+    });
   }
 
   private initAudioContext() {
@@ -239,7 +321,14 @@ export class ChatWidget {
 
   private bindEvents() {
     this.launcherBtn.addEventListener("click", () => {
+      if (this.isDragging) return; // Prevent toggle if dragging
       const isOpen = this.chatWindow.classList.toggle("open");
+      
+      // Prevent body scrolling when open on mobile
+      if (window.innerWidth <= 600) {
+        document.body.style.overflow = isOpen ? "hidden" : "";
+      }
+
       if (isOpen) {
         this.resumeAudioContext().catch(console.error);
       } else {
@@ -269,6 +358,7 @@ export class ChatWidget {
     if (closeBtn) {
       closeBtn.addEventListener("click", () => {
         this.chatWindow.classList.remove("open");
+        document.body.style.overflow = ""; // Ensure scroll is restored
         this.resetAudioState();
       });
     }
