@@ -9,4 +9,5 @@ export const config = {
     voiceId: 'AYFJOmHxRJdmf572TQ7R',
     modelId: 'eleven_flash_v2_5',
     ttsProvider: process.env.TTS_PROVIDER || 'gemini',
+    maxRowsPerSheet: 500,
 };

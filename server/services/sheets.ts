@@ -17,7 +17,7 @@ export const dataReadyPromise = new Promise<void>((resolve) => {
  * Maps spreadsheet rows to objects using the first row as keys.
  * Converts column names to snake_case for consistency.
  */
-function mapRowsToObjects(header: string[], rows: string[][]): SheetData[] {
+export function mapRowsToObjects(header: string[], rows: string[][]): SheetData[] {
     return rows.map((row) => {
         const obj: SheetData = {};
         header.forEach((key, index) => {
@@ -26,7 +26,8 @@ function mapRowsToObjects(header: string[], rows: string[][]): SheetData[] {
                 .trim()
                 .replace(/([a-z])([A-Z])/g, '$1_$2')
                 .toLowerCase()
-                .replace(/\s+/g, '_');
+                .replace(/[^a-z0-9]+/g, '_')
+                .replace(/^_+|_+$/g, '');
             obj[safeKey] = row[index] || '';
         });
         return obj;
@@ -122,7 +123,23 @@ export async function fetchAllSheets(): Promise<void> {
     }
 }
 
+/**
+ * Returns the spreadsheet data cache, excluding private sheets.
+ */
 export function getAllSheetData(): Map<string, SheetData[]> {
+    const publicCache = new Map<string, SheetData[]>();
+    for (const [name, data] of sheetCache.entries()) {
+        if (!name.toLowerCase().startsWith('private_')) {
+            publicCache.set(name, data);
+        }
+    }
+    return publicCache;
+}
+
+/**
+ * Returns all cached data including private sheets (internal use only).
+ */
+export function getInternalSheetData(): Map<string, SheetData[]> {
     return sheetCache;
 }
 

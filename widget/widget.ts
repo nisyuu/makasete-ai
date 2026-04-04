@@ -1,4 +1,5 @@
 import { io, Socket } from "socket.io-client";
+import { normalizeSettingKey, formatMessageText } from "./utils/text";
 
 interface BufferData {
   type: "Buffer";
@@ -17,13 +18,14 @@ export class ChatWidget {
   private gainNode: GainNode | null = null;
 
   // UI Elements
+  private container: HTMLElement;
   private chatWindow: HTMLElement;
+  private chatTitle: HTMLElement;
   private timeline: HTMLElement;
   private input: HTMLTextAreaElement;
   private sendBtn: HTMLButtonElement;
   private micBtn: HTMLButtonElement;
   private launcherBtn: HTMLButtonElement;
-  private audioToggleBtn: HTMLButtonElement;
   private loadingOverlay: HTMLElement;
 
   // State
@@ -32,14 +34,27 @@ export class ChatWidget {
   private recognition: SpeechRecognition | null = null;
   private serverUrl: string;
 
+  // Dragging state
+  private isDragging = false;
+  private dragStartX = 0;
+  private dragStartY = 0;
+  private containerPosX = 0;
+  private containerPosY = 0;
+
   constructor(shadowRoot: ShadowRoot, serverUrl: string) {
     this.shadowRoot = shadowRoot;
     this.serverUrl = serverUrl;
     this.socket = io(serverUrl);
 
     // Element binding
+    this.container = this.shadowRoot.querySelector(
+      ".widget-container",
+    ) as HTMLElement;
     this.chatWindow = this.shadowRoot.querySelector(
       ".chat-window",
+    ) as HTMLElement;
+    this.chatTitle = this.shadowRoot.querySelector(
+      ".chat-title",
     ) as HTMLElement;
     this.timeline = this.shadowRoot.querySelector(
       ".chat-timeline",
@@ -56,9 +71,6 @@ export class ChatWidget {
     this.launcherBtn = this.shadowRoot.querySelector(
       ".launcher-button",
     ) as HTMLButtonElement;
-    this.audioToggleBtn = this.shadowRoot.querySelector(
-      ".audio-toggle-btn",
-    ) as HTMLButtonElement;
     this.loadingOverlay = this.shadowRoot.querySelector(
       ".loading-overlay",
     ) as HTMLElement;
@@ -66,13 +78,78 @@ export class ChatWidget {
     this.initSocket();
     this.bindEvents();
     this.initSpeechRecognition();
-    this.updateAudioToggleUI();
+    this.initDragging();
     this.waitForData();
+  }
 
-    this.appendMessage(
-      "makasete-server",
-      "AIアシスタントです。何かお手伝いできることはありますか？",
-    );
+  private initDragging() {
+    const header = this.shadowRoot.querySelector(".chat-header") as HTMLElement;
+    const handles = [this.launcherBtn, header];
+
+    const onMouseDown = (e: MouseEvent | TouchEvent) => {
+      // Disable dragging on small screens (mobile)
+      if (window.innerWidth <= 600) return;
+
+      // Don't drag if clicking buttons inside header/launcher
+      const target = e.target as HTMLElement;
+      if (
+        target.closest("button") &&
+        target.closest("button") !== this.launcherBtn
+      )
+        return;
+
+      this.isDragging = false; // Reset on start
+      const clientX = e instanceof MouseEvent ? e.clientX : e.touches[0].clientX;
+      const clientY = e instanceof MouseEvent ? e.clientY : e.touches[0].clientY;
+
+      this.dragStartX = clientX;
+      this.dragStartY = clientY;
+
+      const rect = this.container.getBoundingClientRect();
+      this.containerPosX = rect.left;
+      this.containerPosY = rect.top;
+
+      const onMouseMove = (moveEv: MouseEvent | TouchEvent) => {
+        const moveX =
+          moveEv instanceof MouseEvent ? moveEv.clientX : moveEv.touches[0].clientX;
+        const moveY =
+          moveEv instanceof MouseEvent ? moveEv.clientY : moveEv.touches[0].clientY;
+
+        const deltaX = moveX - this.dragStartX;
+        const deltaY = moveY - this.dragStartY;
+
+        if (!this.isDragging && (Math.abs(deltaX) > 5 || Math.abs(deltaY) > 5)) {
+          this.isDragging = true;
+          // When drag starts, switch to top/left and remove bottom/right constraints
+          this.container.style.bottom = "auto";
+          this.container.style.right = "auto";
+        }
+
+        if (this.isDragging) {
+          this.container.style.left = `${this.containerPosX + deltaX}px`;
+          this.container.style.top = `${this.containerPosY + deltaY}px`;
+        }
+      };
+
+      const onMouseUp = () => {
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("mouseup", onMouseUp);
+        document.removeEventListener("touchmove", onMouseMove);
+        document.removeEventListener("touchend", onMouseUp);
+
+        // Optional: snap to viewport edges if needed
+      };
+
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", onMouseUp);
+      document.addEventListener("touchmove", onMouseMove);
+      document.addEventListener("touchend", onMouseUp);
+    };
+
+    handles.forEach((handle) => {
+      handle.addEventListener("mousedown", onMouseDown);
+      handle.addEventListener("touchstart", onMouseDown, { passive: true });
+    });
   }
 
   private initAudioContext() {
@@ -97,17 +174,54 @@ export class ChatWidget {
   }
 
   private async waitForData() {
+    let title = "AIアシスタント";
+    let initialMsg = "AIアシスタントです。何かお手伝いできることはありますか？";
+    let primaryColor = "";
+
     try {
-      // This endpoint now blocks until data is fetched from Sheets on the server
-      const response = await fetch(`${this.serverUrl}/health`);
-      if (response.ok) {
-        this.loadingOverlay.classList.add("hidden");
-      } else {
+      // This endpoint blocks until data is fetched from Sheets on the server
+      const healthResponse = await fetch(`${this.serverUrl}/health`);
+      if (!healthResponse.ok) {
         console.warn("[MakaseteAI] Failed to verify data readiness");
-        // Optional: show error in overlay
+      }
+
+      // Try to fetch settings
+      const settingsResponse = await fetch(`${this.serverUrl}/api/settings`);
+      if (settingsResponse.ok) {
+        const settingsData = await settingsResponse.json();
+        
+        if (settingsData && Array.isArray(settingsData) && settingsData.length > 0) {
+          // Check if it's key-value format (has 'key' and 'value' properties)
+          if ("key" in settingsData[0] && "value" in settingsData[0]) {
+            for (const row of settingsData) {
+              const k = normalizeSettingKey(row.key);
+              if (k === "chattitle" || k === "title") title = row.value;
+              if (k === "initialmessage" || k === "greeting") initialMsg = row.value;
+              if (k === "primarycolor" || k === "color") primaryColor = row.value;
+            }
+          } else {
+            // Assume row format (single row with columns as properties)
+            const row = settingsData[0];
+            // Headers are already snake_cased by the server
+            if (row.chat_title || row.title) title = row.chat_title || row.title;
+            if (row.initial_message || row.greeting) initialMsg = row.initial_message || row.greeting;
+            if (row.primary_color || row.color) primaryColor = row.primary_color || row.color;
+          }
+        }
       }
     } catch (e) {
-      console.error("[MakaseteAI] Error waiting for data:", e);
+      console.error("[MakaseteAI] Error fetching initial data/settings:", e);
+    } finally {
+      this.chatTitle.textContent = title;
+      this.appendMessage("makasete-server", initialMsg);
+      
+      if (primaryColor) {
+          // Apply dynamic primary color to the shadow host
+          const host = this.shadowRoot.host as HTMLElement;
+          host.style.setProperty('--primary-color', primaryColor);
+      }
+
+      this.loadingOverlay.classList.add("hidden");
     }
   }
 
@@ -224,6 +338,7 @@ export class ChatWidget {
     const useAudio = isVoice || this.isAudioEnabled;
     this.appendMessage("user", text);
     this.input.value = "";
+    this.updateInputActions();
     this.showTypingIndicator();
 
     if (useAudio) {
@@ -237,9 +352,22 @@ export class ChatWidget {
     });
   }
 
+  private updateInputActions() {
+    const hasText = this.input.value.trim().length > 0;
+    this.sendBtn.style.display = hasText ? "flex" : "none";
+    this.micBtn.style.display = hasText ? "none" : "flex";
+  }
+
   private bindEvents() {
     this.launcherBtn.addEventListener("click", () => {
+      if (this.isDragging) return; // Prevent toggle if dragging
       const isOpen = this.chatWindow.classList.toggle("open");
+      
+      // Prevent body scrolling when open on mobile
+      if (window.innerWidth <= 600) {
+        document.body.style.overflow = isOpen ? "hidden" : "";
+      }
+
       if (isOpen) {
         this.resumeAudioContext().catch(console.error);
       } else {
@@ -265,38 +393,17 @@ export class ChatWidget {
       this.toggleRecording();
     });
 
+    this.input.addEventListener("input", () => {
+      this.updateInputActions();
+    });
+
     const closeBtn = this.shadowRoot.querySelector(".close-btn");
     if (closeBtn) {
       closeBtn.addEventListener("click", () => {
         this.chatWindow.classList.remove("open");
+        document.body.style.overflow = ""; // Ensure scroll is restored
         this.resetAudioState();
       });
-    }
-
-    this.audioToggleBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      this.isAudioEnabled = !this.isAudioEnabled;
-      this.updateAudioToggleUI();
-
-      this.resetAudioState();
-      if (this.isAudioEnabled) {
-        this.resumeAudioContext().catch(console.error);
-      }
-    });
-  }
-
-  private updateAudioToggleUI() {
-    const iconSpan = this.audioToggleBtn.querySelector(".audio-icon");
-    const textSpan = this.audioToggleBtn.querySelector(".audio-text");
-
-    if (this.isAudioEnabled) {
-      if (iconSpan) iconSpan.textContent = "🔊";
-      if (textSpan) textSpan.textContent = "音声: ON";
-      this.audioToggleBtn.title = "音声読み上げをOFFにする";
-    } else {
-      if (iconSpan) iconSpan.textContent = "🔇";
-      if (textSpan) textSpan.textContent = "音声: OFF";
-      this.audioToggleBtn.title = "音声読み上げをONにする";
     }
   }
 
@@ -337,6 +444,9 @@ export class ChatWidget {
       this.recognition.start();
       this.isRecording = true;
       this.micBtn.classList.add("recording");
+      
+      // Automatically enable bot voice output if it wasn't already
+      this.isAudioEnabled = true;
     }
   }
 
@@ -351,52 +461,11 @@ export class ChatWidget {
       this.hideTypingIndicator();
     }
 
-    const formatText = (rawText: string) => {
-      // 1. Escape HTML to prevent basic XSS
-      const escapeHtml = (str: string) => {
-        return str.replace(
-          /[&<>"']/g,
-          (m) =>
-            ({
-              "&": "&amp;",
-              "<": "&lt;",
-              ">": "&gt;",
-              '"': "&quot;",
-              "'": "&#39;",
-            })[m] || m,
-        );
-      };
-
-      // 2. Safe URL check for Markdown links
-      // Only allow http, https, and relative paths. Block javascript:, etc.
-      const sanitizeUrl = (url: string) => {
-        const trimmed = url.trim();
-        if (/^(https?:\/\/|\/)/i.test(trimmed)) {
-          return trimmed;
-        }
-        return "#";
-      };
-
-      // First, escape the entire text
-      const escapedText = escapeHtml(rawText);
-
-      // Then, selectively allow Markdown links [text](url)
-      // Note: We use a regex that matches the escaped brackets/parens if necessary,
-      // but since we escaped the whole text first, we need to match the literal chars.
-      return escapedText.replace(
-        /\[((?:[^[\]]|\[[^\]]*\])+)\]\(([^)]+)\)/g,
-        (_match, linkText, url) => {
-          const safeUrl = sanitizeUrl(url);
-          return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${linkText}</a>`;
-        },
-      );
-    };
-
     if (appendToLast && role === "makasete-server") {
       const lastMsg = this.timeline.lastElementChild;
       if (lastMsg && lastMsg.classList.contains("makasete-server")) {
         this.currentMakaseteServerMessageRaw += text;
-        lastMsg.innerHTML = formatText(this.currentMakaseteServerMessageRaw);
+        lastMsg.innerHTML = formatMessageText(this.currentMakaseteServerMessageRaw);
         this.scrollToBottom();
         return;
       }
@@ -408,7 +477,7 @@ export class ChatWidget {
 
     const div = document.createElement("div");
     div.className = `message ${role}`;
-    div.innerHTML = formatText(text);
+    div.innerHTML = formatMessageText(text);
     this.timeline.appendChild(div);
     this.scrollToBottom();
   }

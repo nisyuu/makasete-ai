@@ -1,6 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { config } from "../config";
-import { getAllSheetData, getSystemPrompt } from "./sheets";
+import { getInternalSheetData, getSystemPrompt, SheetData } from "./sheets";
 
 let genAI: GoogleGenerativeAI;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -17,6 +17,37 @@ export function initGemini() {
 }
 
 /**
+ * Builds the system instruction string from sheet data.
+ */
+export function buildSystemInstruction(basePrompt: string, allData: Map<string, SheetData[]>): string {
+    let dynamicContext = "";
+    
+    for (const [sheetName, rows] of allData.entries()) {
+        if (rows.length === 0) continue;
+        
+        dynamicContext += `\n### ${sheetName.toUpperCase()}\n`;
+        
+        // Limit context size per sheet if needed
+        const content = rows.slice(0, config.maxRowsPerSheet).map(row => {
+            return Object.entries(row)
+                .filter(([, val]) => val !== "")
+                .map(([key, val]) => `${key}: ${val}`)
+                .join(", ");
+        }).join("\n- ");
+        
+        dynamicContext += `- ${content}\n`;
+    }
+
+    return `
+${basePrompt}
+
+以下の情報を元に、ユーザーの質問に回答してください。
+複数のカテゴリにまたがる質問には、それぞれの情報を組み合わせて回答してください。
+${dynamicContext}
+`;
+}
+
+/**
  * Generates a text response stream from Gemini.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -27,34 +58,9 @@ export async function generateResponseStream(prompt: string, history: any[] = []
 
     // Get all data from sheets
     const basePrompt = getSystemPrompt() || `あなたは親切なAIアシスタントです。`;
-    const allData = getAllSheetData();
+    const allData = getInternalSheetData();
 
-    // Construct Contexts Dynamically
-    let dynamicContext = "";
-    
-    for (const [sheetName, rows] of allData.entries()) {
-        if (rows.length === 0) continue;
-        
-        dynamicContext += `\n### ${sheetName.toUpperCase()}\n`;
-        
-        // Limit context size per sheet if needed (e.g. first 100 rows)
-        const content = rows.slice(0, 100).map(row => {
-            return Object.entries(row)
-                .filter(([, val]) => val !== "")
-                .map(([key, val]) => `${key}: ${val}`)
-                .join(", ");
-        }).join("\n- ");
-        
-        dynamicContext += `- ${content}\n`;
-    }
-
-    const systemInstruction = `
-${basePrompt}
-
-以下の情報を元に、ユーザーの質問に回答してください。
-複数のカテゴリにまたがる質問には、それぞれの情報を組み合わせて回答してください。
-${dynamicContext}
-`;
+    const systemInstruction = buildSystemInstruction(basePrompt, allData);
 
     try {
         const chat = model.startChat({
