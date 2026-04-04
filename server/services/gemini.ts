@@ -1,6 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { config } from "../config";
-import { getAllSheetData, getSystemPrompt } from "./sheets";
+import { getAllSheetData, getSystemPrompt, SheetData } from "./sheets";
 
 let genAI: GoogleGenerativeAI;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -19,7 +19,7 @@ export function initGemini() {
 /**
  * Builds the system instruction string from sheet data.
  */
-export function buildSystemInstruction(basePrompt: string, allData: Map<string, any[]>): string {
+export function buildSystemInstruction(basePrompt: string, allData: Map<string, SheetData[]>): string {
     let dynamicContext = "";
     
     for (const [sheetName, rows] of allData.entries()) {
