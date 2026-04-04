@@ -24,7 +24,6 @@ export class ChatWidget {
   private sendBtn: HTMLButtonElement;
   private micBtn: HTMLButtonElement;
   private launcherBtn: HTMLButtonElement;
-  private audioToggleBtn: HTMLButtonElement;
   private loadingOverlay: HTMLElement;
 
   // State
@@ -67,9 +66,6 @@ export class ChatWidget {
     this.launcherBtn = this.shadowRoot.querySelector(
       ".launcher-button",
     ) as HTMLButtonElement;
-    this.audioToggleBtn = this.shadowRoot.querySelector(
-      ".audio-toggle-btn",
-    ) as HTMLButtonElement;
     this.loadingOverlay = this.shadowRoot.querySelector(
       ".loading-overlay",
     ) as HTMLElement;
@@ -78,7 +74,6 @@ export class ChatWidget {
     this.bindEvents();
     this.initSpeechRecognition();
     this.initDragging();
-    this.updateAudioToggleUI();
     this.waitForData();
 
     this.appendMessage(
@@ -362,32 +357,6 @@ export class ChatWidget {
         this.resetAudioState();
       });
     }
-
-    this.audioToggleBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      this.isAudioEnabled = !this.isAudioEnabled;
-      this.updateAudioToggleUI();
-
-      this.resetAudioState();
-      if (this.isAudioEnabled) {
-        this.resumeAudioContext().catch(console.error);
-      }
-    });
-  }
-
-  private updateAudioToggleUI() {
-    const iconSpan = this.audioToggleBtn.querySelector(".audio-icon");
-    const textSpan = this.audioToggleBtn.querySelector(".audio-text");
-
-    if (this.isAudioEnabled) {
-      if (iconSpan) iconSpan.textContent = "🔊";
-      if (textSpan) textSpan.textContent = "音声: ON";
-      this.audioToggleBtn.title = "音声読み上げをOFFにする";
-    } else {
-      if (iconSpan) iconSpan.textContent = "🔇";
-      if (textSpan) textSpan.textContent = "音声: OFF";
-      this.audioToggleBtn.title = "音声読み上げをONにする";
-    }
   }
 
   private initSpeechRecognition() {
@@ -427,6 +396,9 @@ export class ChatWidget {
       this.recognition.start();
       this.isRecording = true;
       this.micBtn.classList.add("recording");
+      
+      // Automatically enable bot voice output if it wasn't already
+      this.isAudioEnabled = true;
     }
   }
 

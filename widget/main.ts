@@ -22,21 +22,23 @@ import { ChatWidget } from "./widget";
              <div class="chat-header">
                 <span>AIアシスタント</span>
                 <div class="header-controls">
-                    <button class="audio-toggle-btn" title="音声読み上げOFF">
-                        <span class="audio-icon">🔇</span>
-                        <span class="audio-text">音声: OFF</span>
+                    <button class="close-btn" title="閉じる">
+                        <svg class="lucide lucide-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
                     </button>
-                    <button class="close-btn">×</button>
                 </div>
              </div>
              <div class="chat-timeline"></div>
              <div class="input-area">
-                 <button class="btn mic-btn" title="通話モード">📞</button>
+                 <button class="btn mic-btn" title="音声入力">
+                    <svg class="lucide lucide-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+                 </button>
                  <div class="input-wrapper">
                     <textarea class="text-input" placeholder="質問を入力..." rows="1"></textarea>
                     <div class="input-helper">Command(Ctrl) + Enterで送信</div>
                  </div>
-                 <button class="btn send-btn" title="送信">➤</button>
+                 <button class="btn send-btn" title="送信">
+                    <svg class="lucide lucide-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+                 </button>
              </div>
              <div class="widget-footer">Powered by Makasete AI</div>
              <div class="loading-overlay">
