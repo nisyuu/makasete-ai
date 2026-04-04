@@ -366,7 +366,7 @@
     border-radius: 0;
   }
 
-  .widget-container:has(.chat-window.open) .launcher-button {
+  .chat-window.open ~ .launcher-button {
     display: none;
   }
 
