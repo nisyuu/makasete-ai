@@ -1,6 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { config } from "../config";
-import { getAllSheetData, getSystemPrompt } from "./sheets";
+import { getAllSheetData, getSystemPrompt, SheetData } from "./sheets";
 
 let genAI: GoogleGenerativeAI;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -17,19 +17,9 @@ export function initGemini() {
 }
 
 /**
- * Generates a text response stream from Gemini.
+ * Builds the system instruction string from sheet data.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function generateResponseStream(prompt: string, history: any[] = []) {
-    if (!model) {
-        initGemini();
-    }
-
-    // Get all data from sheets
-    const basePrompt = getSystemPrompt() || `あなたは親切なAIアシスタントです。`;
-    const allData = getAllSheetData();
-
-    // Construct Contexts Dynamically
+export function buildSystemInstruction(basePrompt: string, allData: Map<string, SheetData[]>): string {
     let dynamicContext = "";
     
     for (const [sheetName, rows] of allData.entries()) {
@@ -48,13 +38,29 @@ export async function generateResponseStream(prompt: string, history: any[] = []
         dynamicContext += `- ${content}\n`;
     }
 
-    const systemInstruction = `
+    return `
 ${basePrompt}
 
 以下の情報を元に、ユーザーの質問に回答してください。
 複数のカテゴリにまたがる質問には、それぞれの情報を組み合わせて回答してください。
 ${dynamicContext}
 `;
+}
+
+/**
+ * Generates a text response stream from Gemini.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function generateResponseStream(prompt: string, history: any[] = []) {
+    if (!model) {
+        initGemini();
+    }
+
+    // Get all data from sheets
+    const basePrompt = getSystemPrompt() || `あなたは親切なAIアシスタントです。`;
+    const allData = getAllSheetData();
+
+    const systemInstruction = buildSystemInstruction(basePrompt, allData);
 
     try {
         const chat = model.startChat({

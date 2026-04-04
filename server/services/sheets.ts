@@ -17,7 +17,7 @@ export const dataReadyPromise = new Promise<void>((resolve) => {
  * Maps spreadsheet rows to objects using the first row as keys.
  * Converts column names to snake_case for consistency.
  */
-function mapRowsToObjects(header: string[], rows: string[][]): SheetData[] {
+export function mapRowsToObjects(header: string[], rows: string[][]): SheetData[] {
     return rows.map((row) => {
         const obj: SheetData = {};
         header.forEach((key, index) => {
@@ -26,7 +26,8 @@ function mapRowsToObjects(header: string[], rows: string[][]): SheetData[] {
                 .trim()
                 .replace(/([a-z])([A-Z])/g, '$1_$2')
                 .toLowerCase()
-                .replace(/\s+/g, '_');
+                .replace(/[^a-z0-9]+/g, '_')
+                .replace(/^_+|_+$/g, '');
             obj[safeKey] = row[index] || '';
         });
         return obj;
