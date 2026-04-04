@@ -37,8 +37,8 @@ export async function generateResponseStream(prompt: string, history: any[] = []
         
         dynamicContext += `\n### ${sheetName.toUpperCase()}\n`;
         
-        // Limit context size per sheet if needed (e.g. first 500 rows)
-        const content = rows.slice(0, 500).map(row => {
+        // Limit context size per sheet if needed
+        const content = rows.slice(0, config.maxRowsPerSheet).map(row => {
             return Object.entries(row)
                 .filter(([, val]) => val !== "")
                 .map(([key, val]) => `${key}: ${val}`)
