@@ -1,6 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { config } from "../config";
-import { getAllSheetData, getSystemPrompt, SheetData } from "./sheets";
+import { getInternalSheetData, getSystemPrompt } from "./sheets";
 
 let genAI: GoogleGenerativeAI;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -58,7 +58,7 @@ export async function generateResponseStream(prompt: string, history: any[] = []
 
     // Get all data from sheets
     const basePrompt = getSystemPrompt() || `あなたは親切なAIアシスタントです。`;
-    const allData = getAllSheetData();
+    const allData = getInternalSheetData();
 
     const systemInstruction = buildSystemInstruction(basePrompt, allData);
 

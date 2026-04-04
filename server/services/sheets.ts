@@ -123,7 +123,23 @@ export async function fetchAllSheets(): Promise<void> {
     }
 }
 
+/**
+ * Returns the spreadsheet data cache, excluding private sheets.
+ */
 export function getAllSheetData(): Map<string, SheetData[]> {
+    const publicCache = new Map<string, SheetData[]>();
+    for (const [name, data] of sheetCache.entries()) {
+        if (!name.toLowerCase().startsWith('private_')) {
+            publicCache.set(name, data);
+        }
+    }
+    return publicCache;
+}
+
+/**
+ * Returns all cached data including private sheets (internal use only).
+ */
+export function getInternalSheetData(): Map<string, SheetData[]> {
     return sheetCache;
 }
 
