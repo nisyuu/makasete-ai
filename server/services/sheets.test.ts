@@ -79,6 +79,7 @@ describe('sheets service utilities', () => {
             const sheets = google.sheets({ version: 'v4' });
             
             // Mock listing sheets
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             (sheets.spreadsheets.get as any).mockResolvedValue({
                 data: {
                     sheets: [
@@ -89,6 +90,7 @@ describe('sheets service utilities', () => {
             });
 
             // Mock fetching sheet values
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             (sheets.spreadsheets.values.get as any).mockImplementation(({ range }: { range: string }) => {
                 return Promise.resolve({
                     data: {
