@@ -92,6 +92,9 @@ export class ChatWidget {
     const handles = [this.launcherBtn, header];
 
     const onMouseDown = (e: MouseEvent | TouchEvent) => {
+      // Disable dragging on small screens (mobile)
+      if (window.innerWidth <= 600) return;
+
       // Don't drag if clicking buttons inside header/launcher
       const target = e.target as HTMLElement;
       if (
@@ -320,6 +323,12 @@ export class ChatWidget {
     this.launcherBtn.addEventListener("click", () => {
       if (this.isDragging) return; // Prevent toggle if dragging
       const isOpen = this.chatWindow.classList.toggle("open");
+      
+      // Prevent body scrolling when open on mobile
+      if (window.innerWidth <= 600) {
+        document.body.style.overflow = isOpen ? "hidden" : "";
+      }
+
       if (isOpen) {
         this.resumeAudioContext().catch(console.error);
       } else {
@@ -349,6 +358,7 @@ export class ChatWidget {
     if (closeBtn) {
       closeBtn.addEventListener("click", () => {
         this.chatWindow.classList.remove("open");
+        document.body.style.overflow = ""; // Ensure scroll is restored
         this.resetAudioState();
       });
     }
