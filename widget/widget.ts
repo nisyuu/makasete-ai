@@ -19,12 +19,12 @@ export class ChatWidget {
   // UI Elements
   private container: HTMLElement;
   private chatWindow: HTMLElement;
+  private chatTitle: HTMLElement;
   private timeline: HTMLElement;
   private input: HTMLTextAreaElement;
   private sendBtn: HTMLButtonElement;
   private micBtn: HTMLButtonElement;
   private launcherBtn: HTMLButtonElement;
-  private audioToggleBtn: HTMLButtonElement;
   private loadingOverlay: HTMLElement;
 
   // State
@@ -52,6 +52,9 @@ export class ChatWidget {
     this.chatWindow = this.shadowRoot.querySelector(
       ".chat-window",
     ) as HTMLElement;
+    this.chatTitle = this.shadowRoot.querySelector(
+      ".chat-title",
+    ) as HTMLElement;
     this.timeline = this.shadowRoot.querySelector(
       ".chat-timeline",
     ) as HTMLElement;
@@ -67,9 +70,6 @@ export class ChatWidget {
     this.launcherBtn = this.shadowRoot.querySelector(
       ".launcher-button",
     ) as HTMLButtonElement;
-    this.audioToggleBtn = this.shadowRoot.querySelector(
-      ".audio-toggle-btn",
-    ) as HTMLButtonElement;
     this.loadingOverlay = this.shadowRoot.querySelector(
       ".loading-overlay",
     ) as HTMLElement;
@@ -78,13 +78,7 @@ export class ChatWidget {
     this.bindEvents();
     this.initSpeechRecognition();
     this.initDragging();
-    this.updateAudioToggleUI();
     this.waitForData();
-
-    this.appendMessage(
-      "makasete-server",
-      "AIアシスタントです。何かお手伝いできることはありますか？",
-    );
   }
 
   private initDragging() {
@@ -179,17 +173,57 @@ export class ChatWidget {
   }
 
   private async waitForData() {
+    let title = "AIアシスタント";
+    let initialMsg = "AIアシスタントです。何かお手伝いできることはありますか？";
+    let primaryColor = "";
+
     try {
-      // This endpoint now blocks until data is fetched from Sheets on the server
-      const response = await fetch(`${this.serverUrl}/health`);
-      if (response.ok) {
-        this.loadingOverlay.classList.add("hidden");
-      } else {
+      // This endpoint blocks until data is fetched from Sheets on the server
+      const healthResponse = await fetch(`${this.serverUrl}/health`);
+      if (!healthResponse.ok) {
         console.warn("[MakaseteAI] Failed to verify data readiness");
-        // Optional: show error in overlay
+      }
+
+      // Try to fetch settings
+      const settingsResponse = await fetch(`${this.serverUrl}/api/settings`);
+      if (settingsResponse.ok) {
+        const settingsData = await settingsResponse.json();
+        
+        if (settingsData && Array.isArray(settingsData) && settingsData.length > 0) {
+          // Normalizer for keys to handle various input styles
+          const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+          // Check if it's key-value format (has 'key' and 'value' properties)
+          if ("key" in settingsData[0] && "value" in settingsData[0]) {
+            for (const row of settingsData) {
+              const k = normalize(row.key);
+              if (k === "chattitle" || k === "title") title = row.value;
+              if (k === "initialmessage" || k === "greeting") initialMsg = row.value;
+              if (k === "primarycolor" || k === "color") primaryColor = row.value;
+            }
+          } else {
+            // Assume row format (single row with columns as properties)
+            const row = settingsData[0];
+            // Headers are already snake_cased by the server
+            if (row.chat_title || row.title) title = row.chat_title || row.title;
+            if (row.initial_message || row.greeting) initialMsg = row.initial_message || row.greeting;
+            if (row.primary_color || row.color) primaryColor = row.primary_color || row.color;
+          }
+        }
       }
     } catch (e) {
-      console.error("[MakaseteAI] Error waiting for data:", e);
+      console.error("[MakaseteAI] Error fetching initial data/settings:", e);
+    } finally {
+      this.chatTitle.textContent = title;
+      this.appendMessage("makasete-server", initialMsg);
+      
+      if (primaryColor) {
+          // Apply dynamic primary color to the shadow host
+          const host = this.shadowRoot.host as HTMLElement;
+          host.style.setProperty('--primary-color', primaryColor);
+      }
+
+      this.loadingOverlay.classList.add("hidden");
     }
   }
 
@@ -306,6 +340,7 @@ export class ChatWidget {
     const useAudio = isVoice || this.isAudioEnabled;
     this.appendMessage("user", text);
     this.input.value = "";
+    this.updateInputActions();
     this.showTypingIndicator();
 
     if (useAudio) {
@@ -317,6 +352,12 @@ export class ChatWidget {
       text,
       isVoiceInput: useAudio,
     });
+  }
+
+  private updateInputActions() {
+    const hasText = this.input.value.trim().length > 0;
+    this.sendBtn.style.display = hasText ? "flex" : "none";
+    this.micBtn.style.display = hasText ? "none" : "flex";
   }
 
   private bindEvents() {
@@ -354,6 +395,10 @@ export class ChatWidget {
       this.toggleRecording();
     });
 
+    this.input.addEventListener("input", () => {
+      this.updateInputActions();
+    });
+
     const closeBtn = this.shadowRoot.querySelector(".close-btn");
     if (closeBtn) {
       closeBtn.addEventListener("click", () => {
@@ -361,32 +406,6 @@ export class ChatWidget {
         document.body.style.overflow = ""; // Ensure scroll is restored
         this.resetAudioState();
       });
-    }
-
-    this.audioToggleBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      this.isAudioEnabled = !this.isAudioEnabled;
-      this.updateAudioToggleUI();
-
-      this.resetAudioState();
-      if (this.isAudioEnabled) {
-        this.resumeAudioContext().catch(console.error);
-      }
-    });
-  }
-
-  private updateAudioToggleUI() {
-    const iconSpan = this.audioToggleBtn.querySelector(".audio-icon");
-    const textSpan = this.audioToggleBtn.querySelector(".audio-text");
-
-    if (this.isAudioEnabled) {
-      if (iconSpan) iconSpan.textContent = "🔊";
-      if (textSpan) textSpan.textContent = "音声: ON";
-      this.audioToggleBtn.title = "音声読み上げをOFFにする";
-    } else {
-      if (iconSpan) iconSpan.textContent = "🔇";
-      if (textSpan) textSpan.textContent = "音声: OFF";
-      this.audioToggleBtn.title = "音声読み上げをONにする";
     }
   }
 
@@ -427,6 +446,9 @@ export class ChatWidget {
       this.recognition.start();
       this.isRecording = true;
       this.micBtn.classList.add("recording");
+      
+      // Automatically enable bot voice output if it wasn't already
+      this.isAudioEnabled = true;
     }
   }
 
