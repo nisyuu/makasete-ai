@@ -301,6 +301,7 @@ export class ChatWidget {
     const useAudio = isVoice || this.isAudioEnabled;
     this.appendMessage("user", text);
     this.input.value = "";
+    this.updateInputActions();
     this.showTypingIndicator();
 
     if (useAudio) {
@@ -312,6 +313,12 @@ export class ChatWidget {
       text,
       isVoiceInput: useAudio,
     });
+  }
+
+  private updateInputActions() {
+    const hasText = this.input.value.trim().length > 0;
+    this.sendBtn.style.display = hasText ? "flex" : "none";
+    this.micBtn.style.display = hasText ? "none" : "flex";
   }
 
   private bindEvents() {
@@ -347,6 +354,10 @@ export class ChatWidget {
     this.micBtn.addEventListener("click", () => {
       this.resumeAudioContext().catch(console.error);
       this.toggleRecording();
+    });
+
+    this.input.addEventListener("input", () => {
+      this.updateInputActions();
     });
 
     const closeBtn = this.shadowRoot.querySelector(".close-btn");
