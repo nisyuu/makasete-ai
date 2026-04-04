@@ -1,5 +1,32 @@
-import { describe, it, expect } from 'vitest';
-import { mapRowsToObjects } from './sheets';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mapRowsToObjects, getAllSheetData, getInternalSheetData, fetchAllSheets } from './sheets';
+import { google } from 'googleapis';
+import { config } from '../config';
+
+// 1. Correctly mock googleapis
+vi.mock('googleapis', () => {
+    const mockSpreadsheets = {
+        get: vi.fn(),
+        values: {
+            get: vi.fn(),
+        },
+    };
+    return {
+        google: {
+            auth: {
+                // Use a proper function for the constructor
+                GoogleAuth: vi.fn().mockImplementation(function() {
+                    return {
+                        getCredentials: vi.fn(),
+                    };
+                }),
+            },
+            sheets: vi.fn().mockReturnValue({
+                spreadsheets: mockSpreadsheets,
+            }),
+        },
+    };
+});
 
 describe('sheets service utilities', () => {
     describe('mapRowsToObjects', () => {
@@ -39,6 +66,50 @@ describe('sheets service utilities', () => {
             const result = mapRowsToObjects(header, rows);
             expect(result[0]).toEqual({ id: '1', name: 'Apple' });
             expect(Object.keys(result[0])).not.toContain('');
+        });
+    });
+
+    describe('Sheet Filtering (Private vs Public)', () => {
+        beforeEach(() => {
+            vi.clearAllMocks();
+            config.googleSheetsId = 'test-id';
+        });
+
+        it('should filter out private_ sheets in getAllSheetData but keep in getInternalSheetData', async () => {
+            const sheets = google.sheets({ version: 'v4' });
+            
+            // Mock listing sheets
+            (sheets.spreadsheets.get as any).mockResolvedValue({
+                data: {
+                    sheets: [
+                        { properties: { title: 'faq' } },
+                        { properties: { title: 'private_knowledge' } },
+                    ]
+                }
+            });
+
+            // Mock fetching sheet values
+            (sheets.spreadsheets.values.get as any).mockImplementation(({ range }: { range: string }) => {
+                return Promise.resolve({
+                    data: {
+                        values: [['ID', 'Value'], ['1', `Data from ${range}`]]
+                    }
+                });
+            });
+
+            // Execute fetch
+            await fetchAllSheets();
+
+            const publicData = getAllSheetData();
+            const internalData = getInternalSheetData();
+
+            // Public check: 'faq' should be there, 'private_knowledge' should be hidden
+            expect(publicData.has('faq')).toBe(true);
+            expect(publicData.has('private_knowledge')).toBe(false);
+
+            // Internal check: both should be there
+            expect(internalData.has('faq')).toBe(true);
+            expect(internalData.has('private_knowledge')).toBe(true);
         });
     });
 });
