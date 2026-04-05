@@ -255,8 +255,6 @@ export class ChatWidget {
   }
 
   private handleAudioChunk(content: unknown) {
-    if (!this.isAudioEnabled) return;
-
     let rawData: ArrayBuffer;
     if (content instanceof ArrayBuffer) {
       rawData = content;
@@ -444,9 +442,6 @@ export class ChatWidget {
       this.recognition.start();
       this.isRecording = true;
       this.micBtn.classList.add("recording");
-      
-      // Automatically enable bot voice output if it wasn't already
-      this.isAudioEnabled = true;
     }
   }
 
