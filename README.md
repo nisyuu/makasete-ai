@@ -26,11 +26,25 @@ ECサイトやサービスサイトに簡単導入でき、音声とテキスト
 
 ### バックエンド (Server)
 
-- **技術スタック**: Node.js (v24), Express, Socket.io
+- **技術スタック**: Node.js (v24), Express, Socket.io, **LangChain (LangGraph)**
 - **AI処理**:
   - **LLM**: Google Gemini API (gemini-2.5-flash)
+  - **オーケストレーション**: LangChain / LangGraph によるエージェント構成
   - **TTS**: Google Cloud Text-to-Speech (デフォルト) または ElevenLabs API
 - **データ連携**: Google Sheets API (商品情報・FAQ・サービス紹介・システムプロンプトの取得)
+
+## 自律型開発エージェント (Autonomous Agent)
+
+本プロジェクトには、GitHub Issue を元に自動でコード修正と Pull Request 作成を行う自律型エージェントが搭載されています。
+
+- **技術スタック**: LangGraph, Claude 4.6 Sonnet (Anthropic)
+- **仕組み**:
+  1. `ai-power` ラベルが付与された Issue を検知。
+  2. 現状のコードベースを分析し、修正プランを作成。
+  3. コードを自動修正し、型チェック・リンター・テストを実行。
+  4. テストが失敗した場合は、エラー内容を元に最大 5 回まで再試行。
+  5. 最終的な修正内容を Pull Request として送信。
+- **実行環境**: GitHub Actions (`.github/workflows/autonomous-agent.yml`)
 
 ## セキュリティ対策
 
@@ -81,6 +95,9 @@ pnpm typecheck
 
 # リンター
 pnpm lint
+
+# 任意のTypeScriptスクリプトを実行 (tsx)
+pnpm tsx path/to/script.ts
 ```
 
 ## 埋め込み方法
