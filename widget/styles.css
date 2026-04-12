@@ -7,6 +7,58 @@
   --text-color: #1E293B;
   --white: #ffffff;
   --shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+
+  /* Locale-specific font stacks */
+  --font-ja: 'Segoe UI', 'Hiragino Sans', 'Meiryo', Roboto, Helvetica, Arial, sans-serif;
+  --font-en: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-zh: 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+/* Locale-specific font overrides */
+:host([lang="ja"]) {
+  font-family: var(--font-ja);
+}
+
+:host([lang="en"]) {
+  font-family: var(--font-en);
+}
+
+:host([lang="zh-CN"]),
+:host([lang="zh"]) {
+  font-family: var(--font-zh);
+}
+
+/* RTL layout support (for future Arabic/Hebrew locales) */
+:host([dir="rtl"]) .chat-window {
+  right: auto;
+  left: 0;
+}
+
+:host([dir="rtl"]) .widget-container {
+  right: auto;
+  left: 20px;
+}
+
+:host([dir="rtl"]) .message.user {
+  align-self: flex-start;
+  border-bottom-right-radius: 18px;
+  border-bottom-left-radius: 4px;
+}
+
+:host([dir="rtl"]) .message.makasete-server {
+  align-self: flex-end;
+  border-bottom-left-radius: 18px;
+  border-bottom-right-radius: 4px;
+}
+
+:host([dir="rtl"]) .input-actions {
+  justify-content: flex-start;
+}
+
+:host([dir="rtl"]) .input-helper {
+  text-align: left;
+  margin-right: 0;
+  margin-left: 4px;
 }
 
 .widget-container {

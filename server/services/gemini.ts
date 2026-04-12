@@ -1,87 +1,81 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { config } from "../config";
-import { getInternalSheetData, getSystemPrompt, SheetData } from "./sheets";
+import { type Message } from "../schema";
 
-let genAI: GoogleGenerativeAI;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let model: any;
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
-export function initGemini() {
-    if (!config.geminiApiKey) {
-        console.error("GEMINI_API_KEY is missing");
-        return;
-    }
-    genAI = new GoogleGenerativeAI(config.geminiApiKey);
-    // Use gemini-2.5-flash as originally intended, non-JSON streaming mode
-    model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+export function buildSystemInstruction(config: {
+  businessName?: string;
+  systemPrompt?: string;
+}): string {
+  const parts: string[] = [];
+
+  if (config.businessName) {
+    parts.push(`You are a helpful assistant for ${config.businessName}.`);
+  } else {
+    parts.push("You are a helpful assistant.");
+  }
+
+  if (config.systemPrompt) {
+    parts.push(config.systemPrompt);
+  }
+
+  return parts.join("\n\n");
 }
 
-/**
- * Builds the system instruction string from sheet data.
- */
-export function buildSystemInstruction(basePrompt: string, allData: Map<string, SheetData[]>): string {
-    let dynamicContext = "";
-    
-    for (const [sheetName, rows] of allData.entries()) {
-        if (rows.length === 0) continue;
-        
-        dynamicContext += `\n### ${sheetName.toUpperCase()}\n`;
-        
-        // Limit context size per sheet if needed
-        const content = rows.slice(0, config.maxRowsPerSheet).map(row => {
-            return Object.entries(row)
-                .filter(([, val]) => val !== "")
-                .map(([key, val]) => `${key}: ${val}`)
-                .join(", ");
-        }).join("\n- ");
-        
-        dynamicContext += `- ${content}\n`;
-    }
+export async function generateResponse(
+  messages: Message[],
+  config: {
+    businessName?: string;
+    systemPrompt?: string;
+  } = {}
+): Promise<string> {
+  const model = genAI.getGenerativeModel({
+    model: "gemini-2.0-flash",
+    systemInstruction: buildSystemInstruction(config),
+  });
 
-    return `
-${basePrompt}
+  const history = messages.slice(0, -1).map((msg) => ({
+    role: msg.role === "user" ? "user" : "model",
+    parts: [{ text: msg.content }],
+  }));
 
-以下の情報を元に、ユーザーの質問に回答してください。
-複数のカテゴリにまたがる質問には、それぞれの情報を組み合わせて回答してください。
-${dynamicContext}
-`;
+  const lastMessage = messages[messages.length - 1];
+
+  const chat = model.startChat({ history });
+  const result = await chat.sendMessage(lastMessage.content);
+  return result.response.text();
 }
 
-/**
- * Generates a text response stream from Gemini.
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function generateResponseStream(prompt: string, history: any[] = []) {
-    if (!model) {
-        initGemini();
+export async function generateResponseStream(
+  messages: Message[],
+  config: {
+    businessName?: string;
+    systemPrompt?: string;
+  } = {}
+): Promise<AsyncIterable<string>> {
+  const model = genAI.getGenerativeModel({
+    model: "gemini-2.0-flash",
+    systemInstruction: buildSystemInstruction(config),
+  });
+
+  const history = messages.slice(0, -1).map((msg) => ({
+    role: msg.role === "user" ? "user" : "model",
+    parts: [{ text: msg.content }],
+  }));
+
+  const lastMessage = messages[messages.length - 1];
+
+  const chat = model.startChat({ history });
+  const result = await chat.sendMessageStream(lastMessage.content);
+
+  async function* streamText(): AsyncIterable<string> {
+    for await (const chunk of result.stream) {
+      const text = chunk.text();
+      if (text) {
+        yield text;
+      }
     }
+  }
 
-    // Get all data from sheets
-    const basePrompt = getSystemPrompt() || `あなたは親切なAIアシスタントです。`;
-    const allData = getInternalSheetData();
-
-    const systemInstruction = buildSystemInstruction(basePrompt, allData);
-
-    try {
-        const chat = model.startChat({
-            history: [
-                {
-                    role: "user",
-                    parts: [{ text: systemInstruction }]
-                },
-                {
-                    role: "model",
-                    parts: [{ text: "承知いたしました。提供された情報を把握しました。接客を開始します。" }]
-                },
-                ...history
-            ]
-        });
-
-        const result = await chat.sendMessageStream(prompt);
-        return result.stream;
-    } catch (e: unknown) {
-        const message = e instanceof Error ? e.message : String(e);
-        console.error("Gemini Error:", message);
-        throw e;
-    }
+  return streamText();
 }

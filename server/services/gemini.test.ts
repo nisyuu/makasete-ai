@@ -1,48 +1,72 @@
-import { describe, it, expect } from 'vitest';
-import { buildSystemInstruction } from './gemini';
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { buildSystemInstruction, generateResponse } from "./gemini";
 
-describe('Gemini service utilities', () => {
-    describe('buildSystemInstruction', () => {
-        it('should construct a system prompt with sheet data', () => {
-            const basePrompt = 'You are a helpful assistant.';
-            const allData = new Map([
-                ['products', [
-                    { id: '1', name: 'Apple' },
-                    { id: '2', name: 'Banana' }
-                ]]
-            ]);
-            
-            const result = buildSystemInstruction(basePrompt, allData);
-            
-            expect(result).toContain(basePrompt);
-            expect(result).toContain('### PRODUCTS');
-            expect(result).toContain('id: 1, name: Apple');
-            expect(result).toContain('id: 2, name: Banana');
-        });
+vi.mock("@google/generative-ai", () => {
+  const mockSendMessage = vi.fn().mockResolvedValue({
+    response: { text: () => "Hello! How can I help you?" },
+  });
 
-        it('should handle empty sheets', () => {
-            const basePrompt = 'Prompt';
-            const allData = new Map([
-                ['empty', []]
-            ]);
-            
-            const result = buildSystemInstruction(basePrompt, allData);
-            expect(result).not.toContain('### EMPTY');
-        });
+  const mockStartChat = vi.fn().mockReturnValue({
+    sendMessage: mockSendMessage,
+  });
 
-        it('should omit empty values in rows', () => {
-            const allData = new Map([
-                ['test', [{ key: 'value', empty: '' }]]
-            ]);
-            const result = buildSystemInstruction('Base', allData);
-            expect(result).toContain('key: value');
-            expect(result).not.toContain('empty:');
-        });
+  const mockGetGenerativeModel = vi.fn().mockReturnValue({
+    startChat: mockStartChat,
+  });
 
-        it('should respect the maxRowsPerSheet limit indirectly (via implementation check)', () => {
-             // We can't easily mock config in this setup without more vitest config,
-             // but we can test if the slice logic is present by providing more rows than expected.
-             // For now, we trust the slice(0, config.maxRowsPerSheet) logic if tests pass.
-        });
+  return {
+    GoogleGenerativeAI: vi.fn().mockImplementation(() => ({
+      getGenerativeModel: mockGetGenerativeModel,
+    })),
+  };
+});
+
+describe("buildSystemInstruction", () => {
+  it("returns default instruction when no config provided", () => {
+    const result = buildSystemInstruction({});
+    expect(result).toContain("helpful assistant");
+  });
+
+  it("includes business name when provided", () => {
+    const result = buildSystemInstruction({ businessName: "Acme Corp" });
+    expect(result).toContain("Acme Corp");
+  });
+
+  it("includes system prompt when provided", () => {
+    const result = buildSystemInstruction({
+      systemPrompt: "Always be concise.",
     });
+    expect(result).toContain("Always be concise.");
+  });
+
+  it("includes both business name and system prompt", () => {
+    const result = buildSystemInstruction({
+      businessName: "Acme Corp",
+      systemPrompt: "Always be concise.",
+    });
+    expect(result).toContain("Acme Corp");
+    expect(result).toContain("Always be concise.");
+  });
+});
+
+describe("generateResponse", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns response text from the model", async () => {
+    const messages = [{ role: "user" as const, content: "Hello" }];
+    const result = await generateResponse(messages);
+    expect(result).toBe("Hello! How can I help you?");
+  });
+
+  it("handles conversation history correctly", async () => {
+    const messages = [
+      { role: "user" as const, content: "Hello" },
+      { role: "assistant" as const, content: "Hi there!" },
+      { role: "user" as const, content: "How are you?" },
+    ];
+    const result = await generateResponse(messages);
+    expect(result).toBe("Hello! How can I help you?");
+  });
 });

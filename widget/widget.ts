@@ -6,6 +6,50 @@ interface BufferData {
   data: number[];
 }
 
+/** Supported locale codes (must mirror server/config.ts SUPPORTED_LOCALES) */
+const SUPPORTED_LOCALES = ['ja', 'en', 'zh-CN'] as const;
+type Locale = typeof SUPPORTED_LOCALES[number];
+
+/** Per-locale UI string definitions */
+const i18n: Record<Locale, Record<string, string>> = {
+  ja: {
+    placeholder: '質問を入力...',
+    inputHelper: 'Command(Ctrl) + Enterで送信',
+    send: '送信',
+    mic: '音声入力',
+    close: '閉じる',
+    error: 'エラーが発生しました',
+    defaultTitle: 'AIアシスタント',
+    defaultGreeting: 'AIアシスタントです。何かお手伝いできることはありますか？',
+    loading: '準備中です。少々お待ちください...',
+    poweredBy: 'Powered by Makasete AI',
+  },
+  en: {
+    placeholder: 'Type a message...',
+    inputHelper: 'Press Ctrl + Enter to send',
+    send: 'Send',
+    mic: 'Voice input',
+    close: 'Close',
+    error: 'An error occurred',
+    defaultTitle: 'AI Assistant',
+    defaultGreeting: 'Hello! How can I help you today?',
+    loading: 'Loading, please wait...',
+    poweredBy: 'Powered by Makasete AI',
+  },
+  'zh-CN': {
+    placeholder: '输入消息...',
+    inputHelper: '按 Ctrl + Enter 发送',
+    send: '发送',
+    mic: '语音输入',
+    close: '关闭',
+    error: '发生了错误',
+    defaultTitle: '智能助手',
+    defaultGreeting: '您好！有什么可以帮助您的吗？',
+    loading: '正在加载，请稍候...',
+    poweredBy: 'Powered by Makasete AI',
+  },
+};
+
 export class ChatWidget {
   private shadowRoot: ShadowRoot;
   private socket: Socket;
@@ -27,12 +71,16 @@ export class ChatWidget {
   private micBtn: HTMLButtonElement;
   private launcherBtn: HTMLButtonElement;
   private loadingOverlay: HTMLElement;
+  private loadingText: HTMLElement;
+  private inputHelper: HTMLElement;
+  private widgetFooter: HTMLElement;
 
   // State
   private isRecording = false;
   private isAudioEnabled = false;
   private recognition: SpeechRecognition | null = null;
   private serverUrl: string;
+  private locale: Locale;
 
   // Dragging state
   private isDragging = false;
@@ -41,9 +89,10 @@ export class ChatWidget {
   private containerPosX = 0;
   private containerPosY = 0;
 
-  constructor(shadowRoot: ShadowRoot, serverUrl: string) {
+  constructor(shadowRoot: ShadowRoot, serverUrl: string, locale: Locale = 'ja') {
     this.shadowRoot = shadowRoot;
     this.serverUrl = serverUrl;
+    this.locale = SUPPORTED_LOCALES.includes(locale) ? locale : 'ja';
     this.socket = io(serverUrl);
 
     // Element binding
@@ -74,12 +123,63 @@ export class ChatWidget {
     this.loadingOverlay = this.shadowRoot.querySelector(
       ".loading-overlay",
     ) as HTMLElement;
+    this.loadingText = this.shadowRoot.querySelector(
+      ".loading-text",
+    ) as HTMLElement;
+    this.inputHelper = this.shadowRoot.querySelector(
+      ".input-helper",
+    ) as HTMLElement;
+    this.widgetFooter = this.shadowRoot.querySelector(
+      ".widget-footer",
+    ) as HTMLElement;
 
+    this.applyLocaleStrings();
     this.initSocket();
     this.bindEvents();
     this.initSpeechRecognition();
     this.initDragging();
     this.waitForData();
+  }
+
+  /**
+   * Applies locale-specific UI strings to static elements.
+   */
+  private applyLocaleStrings() {
+    const t = i18n[this.locale];
+
+    this.input.placeholder = t.placeholder;
+
+    if (this.inputHelper) {
+      this.inputHelper.textContent = t.inputHelper;
+    }
+
+    if (this.loadingText) {
+      this.loadingText.textContent = t.loading;
+    }
+
+    if (this.widgetFooter) {
+      this.widgetFooter.textContent = t.poweredBy;
+    }
+
+    // Button titles
+    if (this.sendBtn) {
+      this.sendBtn.title = t.send;
+    }
+    if (this.micBtn) {
+      this.micBtn.title = t.mic;
+    }
+
+    const closeBtn = this.shadowRoot.querySelector(".close-btn") as HTMLButtonElement | null;
+    if (closeBtn) {
+      closeBtn.title = t.close;
+    }
+  }
+
+  /**
+   * Returns the i18n string for the current locale.
+   */
+  private t(key: string): string {
+    return i18n[this.locale]?.[key] ?? i18n['ja'][key] ?? key;
   }
 
   private initDragging() {
@@ -136,8 +236,6 @@ export class ChatWidget {
         document.removeEventListener("mouseup", onMouseUp);
         document.removeEventListener("touchmove", onMouseMove);
         document.removeEventListener("touchend", onMouseUp);
-
-        // Optional: snap to viewport edges if needed
       };
 
       document.addEventListener("mousemove", onMouseMove);
@@ -174,8 +272,9 @@ export class ChatWidget {
   }
 
   private async waitForData() {
-    let title = "AIアシスタント";
-    let initialMsg = "AIアシスタントです。何かお手伝いできることはありますか？";
+    const t = i18n[this.locale];
+    let title = t.defaultTitle;
+    let initialMsg = t.defaultGreeting;
     let primaryColor = "";
 
     try {
@@ -189,7 +288,7 @@ export class ChatWidget {
       const settingsResponse = await fetch(`${this.serverUrl}/api/settings`);
       if (settingsResponse.ok) {
         const settingsData = await settingsResponse.json();
-        
+
         if (settingsData && Array.isArray(settingsData) && settingsData.length > 0) {
           // Check if it's key-value format (has 'key' and 'value' properties)
           if ("key" in settingsData[0] && "value" in settingsData[0]) {
@@ -214,11 +313,11 @@ export class ChatWidget {
     } finally {
       this.chatTitle.textContent = title;
       this.appendMessage("makasete-server", initialMsg);
-      
+
       if (primaryColor) {
-          // Apply dynamic primary color to the shadow host
-          const host = this.shadowRoot.host as HTMLElement;
-          host.style.setProperty('--primary-color', primaryColor);
+        // Apply dynamic primary color to the shadow host
+        const host = this.shadowRoot.host as HTMLElement;
+        host.style.setProperty('--primary-color', primaryColor);
       }
 
       this.loadingOverlay.classList.add("hidden");
@@ -249,7 +348,7 @@ export class ChatWidget {
       console.error("[MakaseteAI] Server error:", data.message);
       this.appendMessage(
         "makasete-server",
-        `エラーが発生しました: ${data.message}`,
+        `${this.t('error')}: ${data.message}`,
       );
     });
   }
@@ -347,6 +446,7 @@ export class ChatWidget {
     this.socket.emit("user-input", {
       text,
       isVoiceInput: useAudio,
+      locale: this.locale,
     });
   }
 
@@ -360,7 +460,7 @@ export class ChatWidget {
     this.launcherBtn.addEventListener("click", () => {
       if (this.isDragging) return; // Prevent toggle if dragging
       const isOpen = this.chatWindow.classList.toggle("open");
-      
+
       // Prevent body scrolling when open on mobile
       if (window.innerWidth <= 600) {
         document.body.style.overflow = isOpen ? "hidden" : "";
@@ -412,7 +512,14 @@ export class ChatWidget {
     if (SpeechRecognition) {
       const recognition = new SpeechRecognition();
       this.recognition = recognition;
-      recognition.lang = "ja-JP";
+
+      // Set recognition language based on locale
+      const recognitionLangMap: Record<Locale, string> = {
+        'ja': 'ja-JP',
+        'en': 'en-US',
+        'zh-CN': 'zh-CN',
+      };
+      recognition.lang = recognitionLangMap[this.locale] ?? 'ja-JP';
       recognition.continuous = false;
       recognition.interimResults = false;
 

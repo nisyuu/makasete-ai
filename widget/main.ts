@@ -1,6 +1,47 @@
 import styles from "./styles.css?inline";
 import { ChatWidget } from "./widget";
 
+/** Supported locale codes (must mirror server/config.ts SUPPORTED_LOCALES) */
+const SUPPORTED_LOCALES = ['ja', 'en', 'zh-CN'] as const;
+type Locale = typeof SUPPORTED_LOCALES[number];
+
+/**
+ * Detects the appropriate locale using the following priority:
+ * 1. `data-locale` attribute on the script tag
+ * 2. `navigator.language` browser setting
+ * 3. Default fallback: 'ja'
+ */
+function detectLocale(): Locale {
+  // 1. Check data-locale attribute on the current script tag
+  const scriptTag = document.currentScript as HTMLScriptElement | null;
+  if (scriptTag) {
+    const dataLocale = scriptTag.dataset.locale;
+    if (dataLocale && SUPPORTED_LOCALES.includes(dataLocale as Locale)) {
+      return dataLocale as Locale;
+    }
+  }
+
+  // 2. Use browser language
+  const browserLang = navigator.language; // e.g. "en-US", "ja", "zh-CN"
+
+  // Exact match first (handles "zh-CN" etc.)
+  if (SUPPORTED_LOCALES.includes(browserLang as Locale)) {
+    return browserLang as Locale;
+  }
+
+  // Prefix match (e.g. "en-GB" -> "en")
+  const langPrefix = browserLang.split('-')[0];
+  const prefixMatch = SUPPORTED_LOCALES.find(
+    (loc) => loc.split('-')[0] === langPrefix,
+  );
+  if (prefixMatch) {
+    return prefixMatch;
+  }
+
+  // 3. Default fallback
+  return 'ja';
+}
+
 (function () {
   const hostId = "makasete-ai-widget-root";
   if (document.getElementById(hostId)) return;
@@ -14,6 +55,16 @@ import { ChatWidget } from "./widget";
   const styleSheet = document.createElement("style");
   styleSheet.textContent = styles;
   shadow.appendChild(styleSheet);
+
+  // Detect locale before building the DOM so placeholders can be set correctly
+  const locale = detectLocale();
+
+  // Set dir attribute on host for RTL language support
+  const rtlLocales: string[] = []; // e.g. ['ar', 'he'] for future RTL support
+  const langPrefix = locale.split('-')[0];
+  if (rtlLocales.includes(langPrefix)) {
+    host.setAttribute('dir', 'rtl');
+  }
 
   const container = document.createElement("div");
   container.className = "widget-container";
@@ -96,5 +147,5 @@ import { ChatWidget } from "./widget";
     console.error("MakaseteAI: Could not determine server URL.");
   }
 
-  new ChatWidget(shadow, serverUrl);
+  new ChatWidget(shadow, serverUrl, locale);
 })();
