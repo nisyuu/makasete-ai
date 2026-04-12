@@ -18,6 +18,7 @@ const AgentState = Annotation.Root({
   issueBody: Annotation<string>(),
   commentBody: Annotation<string>(),
   isPr: Annotation<boolean>(),
+  intent: Annotation<string>(), // IMPLEMENT or CHAT
   plan: Annotation<string>(),
   targetFilesContent: Annotation<Record<string, string>>(),
   testOutput: Annotation<string>(),
@@ -86,6 +87,44 @@ Please address the request.`;
     issueBody: issue.body || "",
     prHeadBranch,
     messages: [new HumanMessage(contextMessage)],
+  };
+};
+
+const analyzeIntent = async (state: AgentStateSchema) => {
+  console.log("--- Analyzing Intent ---");
+  const response = await model.invoke([
+    ...state.messages,
+    new HumanMessage(`Analyze the request. Is this a request to modify the codebase (implement features, fix bugs, refactor, delete files) or just a general question/conversation/explanation?
+Respond with ONLY one word: "IMPLEMENT" or "CHAT".`)
+  ]);
+
+  const intent = (response.content as string).trim().toUpperCase();
+  console.log(`Intent determined: ${intent}`);
+  
+  return {
+    intent: intent.includes("IMPLEMENT") ? "IMPLEMENT" : "CHAT",
+    messages: [response],
+  };
+};
+
+const chatNode = async (state: AgentStateSchema) => {
+  console.log("--- Chatting ---");
+  const response = await model.invoke([
+    ...state.messages,
+    new HumanMessage(`Provide a helpful response to the user's question or comment in JAPANESE. 
+Since you are NOT going to modify any code, focus on explanation, advice, or answering the question based on your knowledge of the project.
+If they asked to implement something but you chose CHAT, explain why (e.g., instructions were unclear).`)
+  ]);
+
+  await octokit.issues.createComment({
+    owner,
+    repo,
+    issue_number: state.issueNumber,
+    body: `## @claude からの回答\n\n${response.content}`,
+  });
+
+  return {
+    messages: [response],
   };
 };
 
@@ -320,13 +359,17 @@ const checkLoopEnd = (state: AgentStateSchema) => {
 // Graph Construction
 const workflow = new StateGraph(AgentState)
   .addNode("fetchContext", fetchContext)
+  .addNode("analyzeIntent", analyzeIntent)
+  .addNode("chatNode", chatNode)
   .addNode("planNode", planNode)
   .addNode("loadFiles", loadFiles)
   .addNode("writeCode", writeCode)
   .addNode("runTests", runTests)
   .addNode("createPR", createPR)
   .addEdge(START, "fetchContext")
-  .addEdge("fetchContext", "planNode")
+  .addEdge("fetchContext", "analyzeIntent")
+  .addConditionalEdges("analyzeIntent", (state) => state.intent === "IMPLEMENT" ? "planNode" : "chatNode")
+  .addEdge("chatNode", END)
   .addEdge("planNode", "loadFiles")
   .addEdge("loadFiles", "writeCode")
   .addEdge("writeCode", "runTests")
@@ -350,6 +393,7 @@ if (require.main === module) {
     issueNumber,
     commentBody,
     isPr,
+    intent: "CHAT",
     loopCount: 0,
     messages: [],
     targetFilesContent: {},
@@ -361,7 +405,7 @@ if (require.main === module) {
     issueTitle: "",
     issueBody: "",
   }).then((finalState) => {
-    console.log(`Finished processing ${isPr ? "PR" : "Issue"} #${issueNumber}. URL: ${finalState.prUrl}`);
+    console.log(`Finished processing ${isPr ? "PR" : "Issue"} #${issueNumber}. Intent: ${finalState.intent}`);
   }).catch((err) => {
     console.error("Agent failed:", err);
     process.exit(1);
