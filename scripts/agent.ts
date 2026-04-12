@@ -16,6 +16,8 @@ const AgentState = Annotation.Root({
   issueNumber: Annotation<number>(),
   issueTitle: Annotation<string>(),
   issueBody: Annotation<string>(),
+  commentBody: Annotation<string>(),
+  isPr: Annotation<boolean>(),
   plan: Annotation<string>(),
   targetFilesContent: Annotation<Record<string, string>>(),
   testOutput: Annotation<string>(),
@@ -25,6 +27,7 @@ const AgentState = Annotation.Root({
     reducer: (x, y) => x.concat(y),
   }),
   prUrl: Annotation<string>(),
+  prHeadBranch: Annotation<string>(),
 });
 
 type AgentStateSchema = typeof AgentState.State;
@@ -37,7 +40,7 @@ const model = new ChatAnthropic({
 });
 
 const owner = process.env.GITHUB_REPOSITORY_OWNER || "nisyuu";
-const repo = process.env.GITHUB_REPOSITORY?.split("/")[1] || "makasete-ai";
+const repo = (process.env.GITHUB_REPOSITORY || "").split("/")[1] || "makasete-ai";
 
 // Helper for shell commands
 const runCmd = (cmd: string) => {
@@ -50,26 +53,46 @@ const runCmd = (cmd: string) => {
 };
 
 // Nodes
-const fetchIssue = async (state: AgentStateSchema) => {
-  console.log("--- Fetching Issue ---");
+const fetchContext = async (state: AgentStateSchema) => {
+  console.log("--- Fetching Context ---");
   const { data: issue } = await octokit.issues.get({
     owner,
     repo,
     issue_number: state.issueNumber,
   });
 
-  // Authorization check is handled by GitHub Action (github.actor == 'nisyuu')
+  let prHeadBranch = "";
+  if (state.isPr) {
+    const { data: pr } = await octokit.pulls.get({
+      owner,
+      repo,
+      pull_number: state.issueNumber,
+    });
+    prHeadBranch = pr.head.ref;
+    console.log(`Working on PR branch: ${prHeadBranch}`);
+    runCmd(`git fetch origin ${prHeadBranch}`);
+    runCmd(`git checkout ${prHeadBranch}`);
+  }
+
+  const contextMessage = `Context: ${state.isPr ? "Pull Request" : "Issue"} #${state.issueNumber}
+Title: ${issue.title}
+Body: ${issue.body || "No body provided."}
+${state.commentBody ? `Comment: ${state.commentBody}` : ""}
+
+Please address the request.`;
+
   return {
     issueTitle: issue.title,
     issueBody: issue.body || "",
-    messages: [new HumanMessage(`Implement changes for issue: ${issue.title}\n\n${issue.body}`)],
+    prHeadBranch,
+    messages: [new HumanMessage(contextMessage)],
   };
 };
 
 const planNode = async (state: AgentStateSchema) => {
   console.log("--- Planning ---");
   // Use find to search codebase including root level
-  const fileList = runCmd("find . -maxdepth 2 -not -path '*/.*' && find src -maxdepth 3 -not -path '*/.*'");
+  const fileList = runCmd("find . -maxdepth 2 -not -path '*/.*' && find server -maxdepth 2 -not -path '*/.*' && find widget -maxdepth 2 -not -path '*/.*'");
   
   const response = await model.invoke([
     ...state.messages,
@@ -190,14 +213,19 @@ const runTests = async () => {
 };
 
 const createPR = async (state: AgentStateSchema) => {
-  console.log("--- Creating Pull Request ---");
-  const branchName = `autonomous-agent-issue-${state.issueNumber}-${Date.now()}`;
+  console.log("--- Creating or Updating Pull Request ---");
   
   // Configure git for CI environment
   runCmd(`git config user.name "github-actions[bot]"`);
   runCmd(`git config user.email "github-actions[bot]@users.noreply.github.com"`);
   
-  runCmd(`git checkout -b ${branchName}`);
+  const branchName = state.isPr && state.prHeadBranch 
+    ? state.prHeadBranch 
+    : `autonomous-agent-issue-${state.issueNumber}-${Date.now()}`;
+
+  if (!state.isPr) {
+    runCmd(`git checkout -b ${branchName}`);
+  }
 
   // ONLY add files that were actually modified by the AI (whitelist from targetFilesContent)
   const modifiedFiles = Object.keys(state.targetFilesContent);
@@ -208,10 +236,37 @@ const createPR = async (state: AgentStateSchema) => {
     }
   }
 
-  runCmd(`git commit -m "Autonomous agent fix for issue #${state.issueNumber}"`);
+  const commitMessage = state.isPr 
+    ? `Update PR #${state.issueNumber} based on @claude mention`
+    : `Autonomous agent fix for issue #${state.issueNumber}`;
+    
+  runCmd(`git commit -m "${commitMessage}"`);
   runCmd(`git push origin ${branchName}`);
 
-  const body = `## 自律型開発エージェントによる自動PR
+  if (state.isPr) {
+    const commentBody = `## @claude による自動更新
+修正が完了しました。
+
+**テスト結果:** ${state.testPassed ? "✅ 合格" : "❌ 不合格 (最大ループ回数に達しました)"}
+
+### 修正されたファイル
+${modifiedFiles.map(f => `- ${f}`).join("\n")}
+
+### 修正内容の要約
+${state.plan.replace(/FILES_TO_MODIFY:.*\n/i, "").trim()}
+
+${!state.testPassed ? "#### テスト失敗ログ\n```\n" + state.testOutput + "\n```" : ""}
+`;
+    await octokit.issues.createComment({
+      owner,
+      repo,
+      issue_number: state.issueNumber,
+      body: commentBody,
+    });
+    return { prUrl: `https://github.com/${owner}/${repo}/pull/${state.issueNumber}` };
+  }
+
+  const prBody = `## 自律型開発エージェントによる自動PR
 このPRは LangGraph と Claude Sonnet 4.6 を使用して自動生成されました。
 
 **対象Issue:** #${state.issueNumber}
@@ -234,7 +289,7 @@ Fixes #${state.issueNumber}
       owner,
       repo,
       title: `[AI Power] ${state.issueTitle}`,
-      body,
+      body: prBody,
       head: branchName,
       base: "develop",
     });
@@ -264,14 +319,14 @@ const checkLoopEnd = (state: AgentStateSchema) => {
 
 // Graph Construction
 const workflow = new StateGraph(AgentState)
-  .addNode("fetchIssue", fetchIssue)
+  .addNode("fetchContext", fetchContext)
   .addNode("planNode", planNode)
   .addNode("loadFiles", loadFiles)
   .addNode("writeCode", writeCode)
   .addNode("runTests", runTests)
   .addNode("createPR", createPR)
-  .addEdge(START, "fetchIssue")
-  .addEdge("fetchIssue", "planNode")
+  .addEdge(START, "fetchContext")
+  .addEdge("fetchContext", "planNode")
   .addEdge("planNode", "loadFiles")
   .addEdge("loadFiles", "writeCode")
   .addEdge("writeCode", "runTests")
@@ -283,6 +338,9 @@ export const agent = workflow.compile();
 // Execution logic
 if (require.main === module) {
   const issueNumber = parseInt(process.argv[2]);
+  const commentBody = process.argv[3] || "";
+  const isPr = process.argv[4] === "true";
+
   if (isNaN(issueNumber)) {
     console.error("Please provide a valid issue number as an argument.");
     process.exit(1);
@@ -290,17 +348,20 @@ if (require.main === module) {
 
   agent.invoke({
     issueNumber,
+    commentBody,
+    isPr,
     loopCount: 0,
     messages: [],
     targetFilesContent: {},
     testOutput: "",
     testPassed: false,
     prUrl: "",
+    prHeadBranch: "",
     plan: "",
     issueTitle: "",
     issueBody: "",
   }).then((finalState) => {
-    console.log(`Finished processing issue #${issueNumber}. PR URL: ${finalState.prUrl}`);
+    console.log(`Finished processing ${isPr ? "PR" : "Issue"} #${issueNumber}. URL: ${finalState.prUrl}`);
   }).catch((err) => {
     console.error("Agent failed:", err);
     process.exit(1);
