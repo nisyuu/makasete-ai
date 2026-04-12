@@ -155,8 +155,11 @@ io.on("connection", (socket) => {
       const streamBuffer = new StreamBuffer();
 
       try {
-        // 1. Get Gemini Stream
-        const stream = await generateResponseStream(text, chatHistory);
+        // 1. Fetch sheet data in the orchestration layer and inject into Gemini service
+        const allData = getAllSheetData();
+
+        // 2. Get Gemini Stream, passing sheet data via dependency injection
+        const stream = await generateResponseStream(text, allData, chatHistory);
         const ttsService = getTTSService();
 
         let fullResponseText = "";
