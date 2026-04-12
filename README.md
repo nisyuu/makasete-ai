@@ -35,16 +35,19 @@ ECサイトやサービスサイトに簡単導入でき、音声とテキスト
 
 ## 自律型開発エージェント (Autonomous Agent)
 
-本プロジェクトには、GitHub Issue を元に自動でコード修正と Pull Request 作成を行う自律型エージェントが搭載されています。
+本プロジェクトには、GitHub Issue や Pull Request を元に、自律的にコード修正・テスト・PR作成を行うエージェントが搭載されています。
 
-- **技術スタック**: LangGraph, Claude 4.6 Sonnet (Anthropic)
-- **仕組み**:
-  1. `ai-power` ラベルが付与された Issue を検知。
-  2. 現状のコードベースを分析し、修正プランを作成。
-  3. コードを自動修正し、型チェック・リンター・テストを実行。
-  4. テストが失敗した場合は、エラー内容を元に最大 5 回まで再試行。
-  5. 最終的な修正内容を Pull Request として送信。
-- **実行環境**: GitHub Actions (`.github/workflows/autonomous-agent.yml`)
+- **技術スタック**: LangGraph, Claude Sonnet 4.6 (Anthropic)
+- **2つの実行モード**:
+  1. **自動モード (`ai-power` ラベル)**:
+     - Issue に `ai-power` ラベルを付与すると自動起動。
+     - コード分析、プラン作成、修正、テストを最大 5 回まで繰り返し、最終的な修正を Pull Request として送信。
+  2. **対話モード (`@claude` メンション)**:
+     - Issue または Pull Request のコメントで `@claude` とメンションすることで起動（リポジトリオーナーのみ）。
+     - **意図判定**: 「コード修正（IMPLEMENT）」か「会話・質問（CHAT）」かを自動判別。
+     - **会話モード**: コードを修正せず、質問への回答や実装方針のアドバイスをコメントで返信。
+     - **実装モード**: 指示に従ってファイルを修正。PR 上でのメンション時は、その PR のブランチを自動で更新（Push）し、実行結果をコメントで報告。
+- **実行環境**: GitHub Actions (`.github/workflows/autonomous-agent.yml`, `.github/workflows/claude.yml`)
 
 ## セキュリティ対策
 
