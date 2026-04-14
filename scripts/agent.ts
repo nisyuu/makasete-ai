@@ -41,8 +41,7 @@ const model = new ChatAnthropic({
 });
 
 const owner = process.env.GITHUB_REPOSITORY_OWNER || "nisyuu";
-const repo =
-  (process.env.GITHUB_REPOSITORY || "").split("/")[1] || "makasete-ai";
+const repo = (process.env.GITHUB_REPOSITORY || "").split("/")[1] || "makasete-ai";
 
 // Helper for shell commands
 const runCmd = (cmd: string) => {
@@ -96,12 +95,12 @@ const analyzeIntent = async (state: AgentStateSchema) => {
   const response = await model.invoke([
     ...state.messages,
     new HumanMessage(`Analyze the request. Is this a request to modify the codebase (implement features, fix bugs, refactor, delete files) or just a general question/conversation/explanation?
-Respond with ONLY one word: "IMPLEMENT" or "CHAT".`),
+Respond with ONLY one word: "IMPLEMENT" or "CHAT".`)
   ]);
 
   const intent = (response.content as string).trim().toUpperCase();
   console.log(`Intent determined: ${intent}`);
-
+  
   return {
     intent: intent.includes("IMPLEMENT") ? "IMPLEMENT" : "CHAT",
     messages: [response],
@@ -114,14 +113,14 @@ const chatNode = async (state: AgentStateSchema) => {
     ...state.messages,
     new HumanMessage(`Provide a helpful response to the user's question or comment in JAPANESE. 
 Since you are NOT going to modify any code, focus on explanation, advice, or answering the question based on your knowledge of the project.
-If they asked to implement something but you chose CHAT, explain why (e.g., instructions were unclear).`),
+If they asked to implement something but you chose CHAT, explain why (e.g., instructions were unclear).`)
   ]);
 
   await octokit.issues.createComment({
     owner,
     repo,
     issue_number: state.issueNumber,
-    body: `## @ai-power からの回答\n\n${response.content}`,
+    body: `## @claude からの回答\n\n${response.content}`,
   });
 
   return {
@@ -132,10 +131,8 @@ If they asked to implement something but you chose CHAT, explain why (e.g., inst
 const planNode = async (state: AgentStateSchema) => {
   console.log("--- Planning ---");
   // Use find to search codebase including root level
-  const fileList = runCmd(
-    "find . -maxdepth 2 -not -path '*/.*' && find server -maxdepth 2 -not -path '*/.*' && find widget -maxdepth 2 -not -path '*/.*'",
-  );
-
+  const fileList = runCmd("find . -maxdepth 2 -not -path '*/.*' && find server -maxdepth 2 -not -path '*/.*' && find widget -maxdepth 2 -not -path '*/.*'");
+  
   const response = await model.invoke([
     ...state.messages,
     new HumanMessage(`Analyze the issue and codebase. Determine which files need modification and provide a detailed plan.
@@ -165,8 +162,8 @@ const loadFiles = async (state: AgentStateSchema) => {
   const match = state.plan.match(/FILES_TO_MODIFY:\s*(.*)/i);
   const paths = (match ? match[1] : "")
     .split(/,|\n/)
-    .map((p) => p.trim().replace(/^[-*]\s*/, "")) // handle bullets
-    .filter((p) => p.length > 0 && !p.includes(" "));
+    .map(p => p.trim().replace(/^[-*]\s*/, "")) // handle bullets
+    .filter(p => p.length > 0 && !p.includes(" "));
 
   const targetFilesContent: Record<string, string> = {};
   for (const p of paths) {
@@ -176,7 +173,7 @@ const loadFiles = async (state: AgentStateSchema) => {
       } else if (!fs.existsSync(p)) {
         // AI wants to create a new file
         console.log(`AI intends to create a new file: ${p}`);
-        targetFilesContent[p] = "";
+        targetFilesContent[p] = ""; 
       }
     } catch {
       console.warn(`Failed to read file: ${p}`);
@@ -192,20 +189,17 @@ const writeCode = async (state: AgentStateSchema) => {
     .map(([p, content]) => `File: ${p}\nContent:\n\`\`\`\n${content}\n\`\`\``)
     .join("\n\n");
 
-  const prompt = state.testOutput
+  const prompt = state.testOutput 
     ? `The previous attempt failed with the following test errors:\n${state.testOutput.slice(-3000)}\n\nPlease fix the code accordingly.`
     : `Please implement the requested changes based on the following files:\n${fileContext}\n\nPlan:\n${state.plan}`;
 
   const response = await model.invoke([
-    new HumanMessage(
-      prompt +
-        "\n\nProvide the complete updated content for each modified file. Use the following format for each file:\n\nFILE: path/to/file\n```\n(complete file content here)\n```",
-    ),
+    new HumanMessage(prompt + "\n\nProvide the complete updated content for each modified file. Use the following format for each file:\n\nFILE: path/to/file\n```\n(complete file content here)\n```")
   ]);
 
   const content = response.content as string;
   const fileBlocks = content.split(/FILE:\s*/).slice(1); // ignore preamble
-
+  
   const updatedFiles: Record<string, string> = { ...state.targetFilesContent };
   for (const block of fileBlocks) {
     const match = block.match(/^([^\n]+)\n```(?:\w+)?\n([\s\S]*?)```/);
@@ -246,9 +240,7 @@ const runCmdWithStatus = (cmd: string) => {
 const runTests = async () => {
   console.log("--- Running Tests ---");
   // Use exit code to determine success/failure accurately
-  const { output, passed } = runCmdWithStatus(
-    "pnpm typecheck && pnpm lint && pnpm test",
-  );
+  const { output, passed } = runCmdWithStatus("pnpm typecheck && pnpm lint && pnpm test");
 
   // Trim output for next loop
   const trimmedOutput = output.length > 5000 ? output.slice(-5000) : output;
@@ -261,17 +253,14 @@ const runTests = async () => {
 
 const createPR = async (state: AgentStateSchema) => {
   console.log("--- Creating or Updating Pull Request ---");
-
+  
   // Configure git for CI environment
   runCmd(`git config user.name "github-actions[bot]"`);
-  runCmd(
-    `git config user.email "github-actions[bot]@users.noreply.github.com"`,
-  );
-
-  const branchName =
-    state.isPr && state.prHeadBranch
-      ? state.prHeadBranch
-      : `autonomous-agent-issue-${state.issueNumber}-${Date.now()}`;
+  runCmd(`git config user.email "github-actions[bot]@users.noreply.github.com"`);
+  
+  const branchName = state.isPr && state.prHeadBranch 
+    ? state.prHeadBranch 
+    : `autonomous-agent-issue-${state.issueNumber}-${Date.now()}`;
 
   if (!state.isPr) {
     runCmd(`git checkout -b ${branchName}`);
@@ -286,21 +275,21 @@ const createPR = async (state: AgentStateSchema) => {
     }
   }
 
-  const commitMessage = state.isPr
-    ? `Update PR #${state.issueNumber} based on @ai-power mention`
+  const commitMessage = state.isPr 
+    ? `Update PR #${state.issueNumber} based on @claude mention`
     : `Autonomous agent fix for issue #${state.issueNumber}`;
-
+    
   runCmd(`git commit -m "${commitMessage}"`);
   runCmd(`git push origin ${branchName}`);
 
   if (state.isPr) {
-    const commentBody = `## @ai-power による自動更新
+    const commentBody = `## @claude による自動更新
 修正が完了しました。
 
 **テスト結果:** ${state.testPassed ? "✅ 合格" : "❌ 不合格 (最大ループ回数に達しました)"}
 
 ### 修正されたファイル
-${modifiedFiles.map((f) => `- ${f}`).join("\n")}
+${modifiedFiles.map(f => `- ${f}`).join("\n")}
 
 ### 修正内容の要約
 ${state.plan.replace(/FILES_TO_MODIFY:.*\n/i, "").trim()}
@@ -313,9 +302,7 @@ ${!state.testPassed ? "#### テスト失敗ログ\n```\n" + state.testOutput + "
       issue_number: state.issueNumber,
       body: commentBody,
     });
-    return {
-      prUrl: `https://github.com/${owner}/${repo}/pull/${state.issueNumber}`,
-    };
+    return { prUrl: `https://github.com/${owner}/${repo}/pull/${state.issueNumber}` };
   }
 
   const prBody = `## 自律型開発エージェントによる自動PR
@@ -325,7 +312,7 @@ ${!state.testPassed ? "#### テスト失敗ログ\n```\n" + state.testOutput + "
 **テスト結果:** ${state.testPassed ? "✅ 合格" : "❌ 不合格 (最大ループ回数に達しました)"}
 
 ### 修正されたファイル
-${modifiedFiles.map((f) => `- ${f}`).join("\n")}
+${modifiedFiles.map(f => `- ${f}`).join("\n")}
 
 ### 修正内容の要約
 ${state.plan.replace(/FILES_TO_MODIFY:.*\n/i, "").trim()}
@@ -357,10 +344,7 @@ Fixes #${state.issueNumber}
     return { prUrl: pr.html_url };
   } catch (err: unknown) {
     const e = err as { response?: { data: unknown }; message?: string };
-    console.error(
-      "GitHub API 経由の PR 作成またはレビュアー追加に失敗しました:",
-      e.response?.data || e.message,
-    );
+    console.error("GitHub API 経由の PR 作成またはレビュアー追加に失敗しました:", e.response?.data || e.message);
     throw err;
   }
 };
@@ -384,9 +368,7 @@ const workflow = new StateGraph(AgentState)
   .addNode("createPR", createPR)
   .addEdge(START, "fetchContext")
   .addEdge("fetchContext", "analyzeIntent")
-  .addConditionalEdges("analyzeIntent", (state) =>
-    state.intent === "IMPLEMENT" ? "planNode" : "chatNode",
-  )
+  .addConditionalEdges("analyzeIntent", (state) => state.intent === "IMPLEMENT" ? "planNode" : "chatNode")
   .addEdge("chatNode", END)
   .addEdge("planNode", "loadFiles")
   .addEdge("loadFiles", "writeCode")
@@ -407,30 +389,25 @@ if (require.main === module) {
     process.exit(1);
   }
 
-  agent
-    .invoke({
-      issueNumber,
-      commentBody,
-      isPr,
-      intent: "CHAT",
-      loopCount: 0,
-      messages: [],
-      targetFilesContent: {},
-      testOutput: "",
-      testPassed: false,
-      prUrl: "",
-      prHeadBranch: "",
-      plan: "",
-      issueTitle: "",
-      issueBody: "",
-    })
-    .then((finalState) => {
-      console.log(
-        `Finished processing ${isPr ? "PR" : "Issue"} #${issueNumber}. Intent: ${finalState.intent}`,
-      );
-    })
-    .catch((err) => {
-      console.error("Agent failed:", err);
-      process.exit(1);
-    });
+  agent.invoke({
+    issueNumber,
+    commentBody,
+    isPr,
+    intent: "CHAT",
+    loopCount: 0,
+    messages: [],
+    targetFilesContent: {},
+    testOutput: "",
+    testPassed: false,
+    prUrl: "",
+    prHeadBranch: "",
+    plan: "",
+    issueTitle: "",
+    issueBody: "",
+  }).then((finalState) => {
+    console.log(`Finished processing ${isPr ? "PR" : "Issue"} #${issueNumber}. Intent: ${finalState.intent}`);
+  }).catch((err) => {
+    console.error("Agent failed:", err);
+    process.exit(1);
+  });
 }
