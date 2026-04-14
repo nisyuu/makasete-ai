@@ -1,12 +1,12 @@
-name: Claude AI Assistant
+name: AI Assistant
 
 on:
   issue_comment:
     types: [created]
 
 jobs:
-  claude-agent:
-    if: contains(github.event.comment.body, '@claude') && github.event.comment.author_association == 'OWNER'
+  ai-agent:
+    if: contains(github.event.comment.body, '@ai-power') && github.event.comment.author_association == 'OWNER'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -31,7 +31,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Run Claude Agent
+      - name: Run AI Agent
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
