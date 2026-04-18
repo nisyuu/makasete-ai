@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@elevenlabs/elevenlabs-js':
-        specifier: ^2.41.1
-        version: 2.41.1
+        specifier: ^2.43.0
+        version: 2.43.0
       '@google/generative-ai':
         specifier: ^0.24.1
         version: 0.24.1
@@ -136,8 +136,8 @@ packages:
     resolution: {integrity: sha512-IchNf6dN4tHoMFIn/7OE8LWZ19Y6q/67Bmf6vnGREv8RSbBVb9LPJxEcnwrcwX6ixSvaiGoomAUvu4YSxXrVgw==}
     engines: {node: '>=12'}
 
-  '@elevenlabs/elevenlabs-js@2.41.1':
-    resolution: {integrity: sha512-rYpQq49avDjpTtgeOI2sYoMmjyj01egCaPx/bzxemtX8TP1AXOJt3jLYAydOcTz/SBQDBWIOIoNW1tozLROUoA==}
+  '@elevenlabs/elevenlabs-js@2.43.0':
+    resolution: {integrity: sha512-+1eqTvVjEdgzr8L+u/3ebavWXx/sd06zuTTAKb1wwcar3NNQBYjqmMxuVOH6iUjSUvQUWvwK7sFWZEEcE8wp6A==}
     engines: {node: '>=18.0.0'}
 
   '@emnapi/core@1.9.2':
@@ -2747,7 +2747,7 @@ snapshots:
     dependencies:
       '@jridgewell/trace-mapping': 0.3.9
 
-  '@elevenlabs/elevenlabs-js@2.41.1':
+  '@elevenlabs/elevenlabs-js@2.43.0':
     dependencies:
       command-exists: 1.2.9
       node-fetch: 2.7.0
