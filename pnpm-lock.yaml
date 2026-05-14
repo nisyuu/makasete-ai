@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@elevenlabs/elevenlabs-js':
-        specifier: ^2.45.0
-        version: 2.45.0
+        specifier: ^2.47.0
+        version: 2.47.0
       '@google/generative-ai':
         specifier: ^0.24.1
         version: 0.24.1
@@ -44,13 +44,13 @@ importers:
         version: 3.3.0(@cfworker/json-schema@4.1.1)(@types/node@25.6.0)(typescript@5.9.3)
       '@langchain/anthropic':
         specifier: ^1.3.27
-        version: 1.3.27(@langchain/core@1.1.44(ws@8.20.0))
+        version: 1.3.27(@langchain/core@1.1.44(ws@8.20.1))
       '@langchain/core':
         specifier: ^1.1.44
-        version: 1.1.44(ws@8.20.0)
+        version: 1.1.44(ws@8.20.1)
       '@langchain/langgraph':
         specifier: ^1.2.9
-        version: 1.2.9(@langchain/core@1.1.44(ws@8.20.0))(zod-to-json-schema@3.25.2(zod@4.4.2))(zod@4.4.2)
+        version: 1.2.9(@langchain/core@1.1.44(ws@8.20.1))(zod-to-json-schema@3.25.2(zod@4.4.2))(zod@4.4.2)
       '@octokit/rest':
         specifier: ^22.0.1
         version: 22.0.1
@@ -136,8 +136,8 @@ packages:
     resolution: {integrity: sha512-IchNf6dN4tHoMFIn/7OE8LWZ19Y6q/67Bmf6vnGREv8RSbBVb9LPJxEcnwrcwX6ixSvaiGoomAUvu4YSxXrVgw==}
     engines: {node: '>=12'}
 
-  '@elevenlabs/elevenlabs-js@2.45.0':
-    resolution: {integrity: sha512-TqD1tBFs7cLJ4qG8xF0BSYagchEx/ME29mba5x6hOv58NqEFpRHkHquTO78vAS2lD+0yxdCKV7qAyTrZQPnnaQ==}
+  '@elevenlabs/elevenlabs-js@2.47.0':
+    resolution: {integrity: sha512-lv9yNzE4ahsWU+Y0qAjjqKpR1jRMn2M3FJqoWuAJff95EKLenI2y4Z25MgllDrnCwulH2FiI2P+qYPNsnpEN4w==}
     engines: {node: '>=18.0.0'}
 
   '@emnapi/core@1.10.0':
@@ -2864,8 +2864,8 @@ packages:
       utf-8-validate:
         optional: true
 
-  ws@8.20.0:
-    resolution: {integrity: sha512-sAt8BhgNbzCtgGbt2OxmpuryO63ZoDk/sqaB/znQm94T4fCEsy/yV+7CdC1kJhOU9lboAEU7R3kquuycDoibVA==}
+  ws@8.20.1:
+    resolution: {integrity: sha512-It4dO0K5v//JtTXuPkfEOaI3uUN87iYPnqo/ZzqCoG3g8uhA66QUMs/SrM0YK7/NAu+r4LMh/9dq2A7k+rHs+w==}
     engines: {node: '>=10.0.0'}
     peerDependencies:
       bufferutil: ^4.0.1
@@ -2950,11 +2950,11 @@ snapshots:
     dependencies:
       '@jridgewell/trace-mapping': 0.3.9
 
-  '@elevenlabs/elevenlabs-js@2.45.0':
+  '@elevenlabs/elevenlabs-js@2.47.0':
     dependencies:
       command-exists: 1.2.9
       node-fetch: 2.7.0
-      ws: 8.20.0
+      ws: 8.20.1
     transitivePeerDependencies:
       - bufferutil
       - encoding
@@ -3416,13 +3416,13 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@langchain/anthropic@1.3.27(@langchain/core@1.1.44(ws@8.20.0))':
+  '@langchain/anthropic@1.3.27(@langchain/core@1.1.44(ws@8.20.1))':
     dependencies:
       '@anthropic-ai/sdk': 0.90.0(zod@4.4.1)
-      '@langchain/core': 1.1.44(ws@8.20.0)
+      '@langchain/core': 1.1.44(ws@8.20.1)
       zod: 4.4.1
 
-  '@langchain/core@1.1.44(ws@8.20.0)':
+  '@langchain/core@1.1.44(ws@8.20.1)':
     dependencies:
       '@cfworker/json-schema': 4.1.1
       '@standard-schema/spec': 1.1.0
@@ -3430,7 +3430,7 @@ snapshots:
       camelcase: 6.3.0
       decamelize: 1.2.0
       js-tiktoken: 1.0.21
-      langsmith: 0.6.0(ws@8.20.0)
+      langsmith: 0.6.0(ws@8.20.1)
       mustache: 4.2.0
       p-queue: 6.6.2
       zod: 4.4.2
@@ -3441,25 +3441,25 @@ snapshots:
       - openai
       - ws
 
-  '@langchain/langgraph-checkpoint@1.0.1(@langchain/core@1.1.44(ws@8.20.0))':
+  '@langchain/langgraph-checkpoint@1.0.1(@langchain/core@1.1.44(ws@8.20.1))':
     dependencies:
-      '@langchain/core': 1.1.44(ws@8.20.0)
+      '@langchain/core': 1.1.44(ws@8.20.1)
       uuid: 10.0.0
 
-  '@langchain/langgraph-sdk@1.8.9(@langchain/core@1.1.44(ws@8.20.0))':
+  '@langchain/langgraph-sdk@1.8.9(@langchain/core@1.1.44(ws@8.20.1))':
     dependencies:
       '@types/json-schema': 7.0.15
       p-queue: 9.2.0
       p-retry: 7.1.1
       uuid: 13.0.0
     optionalDependencies:
-      '@langchain/core': 1.1.44(ws@8.20.0)
+      '@langchain/core': 1.1.44(ws@8.20.1)
 
-  '@langchain/langgraph@1.2.9(@langchain/core@1.1.44(ws@8.20.0))(zod-to-json-schema@3.25.2(zod@4.4.2))(zod@4.4.2)':
+  '@langchain/langgraph@1.2.9(@langchain/core@1.1.44(ws@8.20.1))(zod-to-json-schema@3.25.2(zod@4.4.2))(zod@4.4.2)':
     dependencies:
-      '@langchain/core': 1.1.44(ws@8.20.0)
-      '@langchain/langgraph-checkpoint': 1.0.1(@langchain/core@1.1.44(ws@8.20.0))
-      '@langchain/langgraph-sdk': 1.8.9(@langchain/core@1.1.44(ws@8.20.0))
+      '@langchain/core': 1.1.44(ws@8.20.1)
+      '@langchain/langgraph-checkpoint': 1.0.1(@langchain/core@1.1.44(ws@8.20.1))
+      '@langchain/langgraph-sdk': 1.8.9(@langchain/core@1.1.44(ws@8.20.1))
       '@standard-schema/spec': 1.1.0
       uuid: 10.0.0
       zod: 4.4.2
@@ -4859,11 +4859,11 @@ snapshots:
     dependencies:
       json-buffer: 3.0.1
 
-  langsmith@0.6.0(ws@8.20.0):
+  langsmith@0.6.0(ws@8.20.1):
     dependencies:
       p-queue: 6.6.2
     optionalDependencies:
-      ws: 8.20.0
+      ws: 8.20.1
 
   levn@0.4.1:
     dependencies:
@@ -5620,7 +5620,7 @@ snapshots:
 
   ws@8.18.3: {}
 
-  ws@8.20.0: {}
+  ws@8.20.1: {}
 
   wsl-utils@0.1.0:
     dependencies:
