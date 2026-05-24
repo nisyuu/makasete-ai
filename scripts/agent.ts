@@ -1,7 +1,5 @@
 import { Octokit } from "@octokit/rest";
-import { ChatAnthropic } from "@langchain/anthropic";
-import { StateGraph, START, END, Annotation } from "@langchain/langgraph";
-import { BaseMessage, HumanMessage } from "@langchain/core/messages";
+import Anthropic from "@anthropic-ai/sdk";
 import { execSync } from "child_process";
 import fs from "fs";
 import path from "path";
@@ -10,39 +8,70 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const MAX_LOOPS = 5;
+const MODEL = "claude-sonnet-4-6";
+const MAX_TOKENS = 8096;
 
-// State definition
-const AgentState = Annotation.Root({
-  issueNumber: Annotation<number>(),
-  issueTitle: Annotation<string>(),
-  issueBody: Annotation<string>(),
-  commentBody: Annotation<string>(),
-  isPr: Annotation<boolean>(),
-  intent: Annotation<string>(), // IMPLEMENT or CHAT
-  plan: Annotation<string>(),
-  targetFilesContent: Annotation<Record<string, string>>(),
-  testOutput: Annotation<string>(),
-  testPassed: Annotation<boolean>(),
-  loopCount: Annotation<number>(),
-  messages: Annotation<BaseMessage[]>({
-    reducer: (x, y) => x.concat(y),
-  }),
-  prUrl: Annotation<string>(),
-  prHeadBranch: Annotation<string>(),
-});
-
-type AgentStateSchema = typeof AgentState.State;
+interface AgentState {
+  issueNumber: number;
+  issueTitle: string;
+  issueBody: string;
+  commentBody: string;
+  isPr: boolean;
+  intent: string;
+  plan: string;
+  targetFilesContent: Record<string, string>;
+  testOutput: string;
+  testPassed: boolean;
+  loopCount: number;
+  messages: Anthropic.MessageParam[];
+  prUrl: string;
+  prHeadBranch: string;
+}
 
 const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
-const model = new ChatAnthropic({
-  model: "claude-sonnet-4-6",
-  apiKey: process.env.ANTHROPIC_API_KEY,
-  temperature: 0,
-});
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const owner = process.env.GITHUB_REPOSITORY_OWNER || "nisyuu";
 const repo =
   (process.env.GITHUB_REPOSITORY || "").split("/")[1] || "makasete-ai";
+
+// Merge consecutive same-role messages to satisfy Anthropic API requirements
+const normalizeMessages = (
+  messages: Anthropic.MessageParam[],
+): Anthropic.MessageParam[] => {
+  const result: Anthropic.MessageParam[] = [];
+  for (const msg of messages) {
+    const last = result[result.length - 1];
+    if (
+      last &&
+      last.role === msg.role &&
+      typeof last.content === "string" &&
+      typeof msg.content === "string"
+    ) {
+      result[result.length - 1] = {
+        role: last.role,
+        content: last.content + "\n\n" + msg.content,
+      };
+    } else {
+      result.push({ ...msg });
+    }
+  }
+  return result;
+};
+
+const callModel = async (
+  messages: Anthropic.MessageParam[],
+): Promise<string> => {
+  const response = await anthropic.messages.create({
+    model: MODEL,
+    max_tokens: MAX_TOKENS,
+    messages: normalizeMessages(messages),
+  });
+  return response.content
+    .filter((block): block is Anthropic.TextBlock => block.type === "text")
+    .map((b) => b.text)
+    .join("");
+};
 
 // Helper for shell commands
 const runCmd = (cmd: string) => {
@@ -54,8 +83,21 @@ const runCmd = (cmd: string) => {
   }
 };
 
+// Helper for shell commands with success/failure status
+const runCmdWithStatus = (cmd: string) => {
+  try {
+    const output = execSync(cmd, { encoding: "utf8", stdio: "pipe" });
+    return { output, passed: true };
+  } catch (error: unknown) {
+    const e = error as { stdout?: string; stderr?: string };
+    return { output: (e.stdout ?? "") + (e.stderr ?? ""), passed: false };
+  }
+};
+
 // Nodes
-const fetchContext = async (state: AgentStateSchema) => {
+const fetchContext = async (
+  state: AgentState,
+): Promise<Partial<AgentState>> => {
   console.log("--- Fetching Context ---");
   const { data: issue } = await octokit.issues.get({
     owner,
@@ -87,79 +129,98 @@ Please address the request.`;
     issueTitle: issue.title,
     issueBody: issue.body || "",
     prHeadBranch,
-    messages: [new HumanMessage(contextMessage)],
+    messages: [{ role: "user", content: contextMessage }],
   };
 };
 
-const analyzeIntent = async (state: AgentStateSchema) => {
+const analyzeIntent = async (
+  state: AgentState,
+): Promise<Partial<AgentState>> => {
   console.log("--- Analyzing Intent ---");
-  const response = await model.invoke([
+  const prompt = `Analyze the request. Is this a request to modify the codebase (implement features, fix bugs, refactor, delete files) or just a general question/conversation/explanation?
+Respond with ONLY one word: "IMPLEMENT" or "CHAT".`;
+
+  const text = await callModel([
     ...state.messages,
-    new HumanMessage(`Analyze the request. Is this a request to modify the codebase (implement features, fix bugs, refactor, delete files) or just a general question/conversation/explanation?
-Respond with ONLY one word: "IMPLEMENT" or "CHAT".`),
+    { role: "user", content: prompt },
   ]);
 
-  const intent = (response.content as string).trim().toUpperCase();
+  const intent = text.trim().toUpperCase();
   console.log(`Intent determined: ${intent}`);
 
   return {
     intent: intent.includes("IMPLEMENT") ? "IMPLEMENT" : "CHAT",
-    messages: [response],
+    messages: [
+      ...state.messages,
+      { role: "user", content: prompt },
+      { role: "assistant", content: text },
+    ],
   };
 };
 
-const chatNode = async (state: AgentStateSchema) => {
+const chatNode = async (state: AgentState): Promise<Partial<AgentState>> => {
   console.log("--- Chatting ---");
-  const response = await model.invoke([
-    ...state.messages,
-    new HumanMessage(`Provide a helpful response to the user's question or comment in JAPANESE. 
+  const prompt = `Provide a helpful response to the user's question or comment in JAPANESE.
 Since you are NOT going to modify any code, focus on explanation, advice, or answering the question based on your knowledge of the project.
-If they asked to implement something but you chose CHAT, explain why (e.g., instructions were unclear).`),
+If they asked to implement something but you chose CHAT, explain why (e.g., instructions were unclear).`;
+
+  const text = await callModel([
+    ...state.messages,
+    { role: "user", content: prompt },
   ]);
 
   await octokit.issues.createComment({
     owner,
     repo,
     issue_number: state.issueNumber,
-    body: `## @ai-power からの回答\n\n${response.content}`,
+    body: `## @ai-power からの回答\n\n${text}`,
   });
 
   return {
-    messages: [response],
+    messages: [
+      ...state.messages,
+      { role: "user", content: prompt },
+      { role: "assistant", content: text },
+    ],
   };
 };
 
-const planNode = async (state: AgentStateSchema) => {
+const planNode = async (state: AgentState): Promise<Partial<AgentState>> => {
   console.log("--- Planning ---");
   // Use find to search codebase including root level
   const fileList = runCmd(
     "find . -maxdepth 2 -not -path '*/.*' && find server -maxdepth 2 -not -path '*/.*' && find widget -maxdepth 2 -not -path '*/.*'",
   );
 
-  const response = await model.invoke([
-    ...state.messages,
-    new HumanMessage(`Analyze the issue and codebase. Determine which files need modification and provide a detailed plan.
+  const prompt = `Analyze the issue and codebase. Determine which files need modification and provide a detailed plan.
 Codebase structure:
 ${fileList}
 
-Respond with a plan in JAPANESE. 
-IMPORTANT: 
+Respond with a plan in JAPANESE.
+IMPORTANT:
 - DO NOT modify configuration files (e.g., package.json, vitest.config.ts, next.config.js, tsconfig.json) unless the issue SPECIFICALLY requests it.
 - Respect the existing project structure and conventions.
 - If you need to create a new file, specify it in FILES_TO_MODIFY.
 
 You MUST include a line "FILES_TO_MODIFY: path1, path2" (comma-separated relative paths) followed by your "DETAILED_INSTRUCTIONS" written in JAPANESE.
-The detailed instructions will be used as the summary of the Pull Request, so please make it clear and professional.`),
+The detailed instructions will be used as the summary of the Pull Request, so please make it clear and professional.`;
+
+  const text = await callModel([
+    ...state.messages,
+    { role: "user", content: prompt },
   ]);
 
-  const planContent = response.content as string;
   return {
-    plan: planContent,
-    messages: [response],
+    plan: text,
+    messages: [
+      ...state.messages,
+      { role: "user", content: prompt },
+      { role: "assistant", content: text },
+    ],
   };
 };
 
-const loadFiles = async (state: AgentStateSchema) => {
+const loadFiles = async (state: AgentState): Promise<Partial<AgentState>> => {
   console.log("--- Loading Files ---");
   // More robust path extraction
   const match = state.plan.match(/FILES_TO_MODIFY:\s*(.*)/i);
@@ -186,7 +247,7 @@ const loadFiles = async (state: AgentStateSchema) => {
   return { targetFilesContent };
 };
 
-const writeCode = async (state: AgentStateSchema) => {
+const writeCode = async (state: AgentState): Promise<Partial<AgentState>> => {
   console.log(`--- Writing Code (Loop: ${state.loopCount + 1}) ---`);
   const fileContext = Object.entries(state.targetFilesContent)
     .map(([p, content]) => `File: ${p}\nContent:\n\`\`\`\n${content}\n\`\`\``)
@@ -196,15 +257,16 @@ const writeCode = async (state: AgentStateSchema) => {
     ? `The previous attempt failed with the following test errors:\n${state.testOutput.slice(-3000)}\n\nPlease fix the code accordingly.`
     : `Please implement the requested changes based on the following files:\n${fileContext}\n\nPlan:\n${state.plan}`;
 
-  const response = await model.invoke([
-    new HumanMessage(
-      prompt +
+  const text = await callModel([
+    {
+      role: "user",
+      content:
+        prompt +
         "\n\nProvide the complete updated content for each modified file. Use the following format for each file:\n\nFILE: path/to/file\n```\n(complete file content here)\n```",
-    ),
+    },
   ]);
 
-  const content = response.content as string;
-  const fileBlocks = content.split(/FILE:\s*/).slice(1); // ignore preamble
+  const fileBlocks = text.split(/FILE:\s*/).slice(1); // ignore preamble
 
   const updatedFiles: Record<string, string> = { ...state.targetFilesContent };
   for (const block of fileBlocks) {
@@ -226,24 +288,10 @@ const writeCode = async (state: AgentStateSchema) => {
   return {
     targetFilesContent: updatedFiles,
     loopCount: state.loopCount + 1,
-    messages: [response],
   };
 };
 
-// Helper for shell commands with success/failure status
-const runCmdWithStatus = (cmd: string) => {
-  try {
-    const output = execSync(cmd, { encoding: "utf8", stdio: "pipe" });
-    return { output, passed: true };
-  } catch (error: unknown) {
-    const e = error as { stdout?: string; stderr?: string };
-    return { output: (e.stdout ?? "") + (e.stderr ?? ""), passed: false };
-  }
-};
-
-// ... (fetchIssue, planNode, loadFiles, writeCode ...)
-
-const runTests = async () => {
+const runTests = async (): Promise<Partial<AgentState>> => {
   console.log("--- Running Tests ---");
   // Use exit code to determine success/failure accurately
   const { output, passed } = runCmdWithStatus(
@@ -259,7 +307,7 @@ const runTests = async () => {
   };
 };
 
-const createPR = async (state: AgentStateSchema) => {
+const createPR = async (state: AgentState): Promise<Partial<AgentState>> => {
   console.log("--- Creating or Updating Pull Request ---");
 
   // Configure git for CI environment
@@ -319,7 +367,7 @@ ${!state.testPassed ? "#### テスト失敗ログ\n```\n" + state.testOutput + "
   }
 
   const prBody = `## 自律型開発エージェントによる自動PR
-このPRは LangGraph と Claude Sonnet 4.6 を使用して自動生成されました。
+このPRは Claude Sonnet 4.6 を使用して自動生成されました。
 
 **対象Issue:** #${state.issueNumber}
 **テスト結果:** ${state.testPassed ? "✅ 合格" : "❌ 不合格 (最大ループ回数に達しました)"}
@@ -365,36 +413,35 @@ Fixes #${state.issueNumber}
   }
 };
 
-// Decision Node
-const checkLoopEnd = (state: AgentStateSchema) => {
+// Decision function
+const checkLoopEnd = (state: AgentState): "createPR" | "writeCode" => {
   if (state.testPassed) return "createPR";
   if (state.loopCount >= MAX_LOOPS) return "createPR";
   return "writeCode";
 };
 
-// Graph Construction
-const workflow = new StateGraph(AgentState)
-  .addNode("fetchContext", fetchContext)
-  .addNode("analyzeIntent", analyzeIntent)
-  .addNode("chatNode", chatNode)
-  .addNode("planNode", planNode)
-  .addNode("loadFiles", loadFiles)
-  .addNode("writeCode", writeCode)
-  .addNode("runTests", runTests)
-  .addNode("createPR", createPR)
-  .addEdge(START, "fetchContext")
-  .addEdge("fetchContext", "analyzeIntent")
-  .addConditionalEdges("analyzeIntent", (state) =>
-    state.intent === "IMPLEMENT" ? "planNode" : "chatNode",
-  )
-  .addEdge("chatNode", END)
-  .addEdge("planNode", "loadFiles")
-  .addEdge("loadFiles", "writeCode")
-  .addEdge("writeCode", "runTests")
-  .addConditionalEdges("runTests", checkLoopEnd)
-  .addEdge("createPR", END);
+export const runAgent = async (initialState: AgentState): Promise<AgentState> => {
+  let state = { ...initialState };
 
-export const agent = workflow.compile();
+  state = { ...state, ...(await fetchContext(state)) };
+  state = { ...state, ...(await analyzeIntent(state)) };
+
+  if (state.intent === "IMPLEMENT") {
+    state = { ...state, ...(await planNode(state)) };
+    state = { ...state, ...(await loadFiles(state)) };
+
+    while (checkLoopEnd(state) === "writeCode") {
+      state = { ...state, ...(await writeCode(state)) };
+      state = { ...state, ...(await runTests()) };
+    }
+
+    state = { ...state, ...(await createPR(state)) };
+  } else {
+    state = { ...state, ...(await chatNode(state)) };
+  }
+
+  return state;
+};
 
 // Execution logic
 if (require.main === module) {
@@ -407,23 +454,22 @@ if (require.main === module) {
     process.exit(1);
   }
 
-  agent
-    .invoke({
-      issueNumber,
-      commentBody,
-      isPr,
-      intent: "CHAT",
-      loopCount: 0,
-      messages: [],
-      targetFilesContent: {},
-      testOutput: "",
-      testPassed: false,
-      prUrl: "",
-      prHeadBranch: "",
-      plan: "",
-      issueTitle: "",
-      issueBody: "",
-    })
+  runAgent({
+    issueNumber,
+    commentBody,
+    isPr,
+    intent: "CHAT",
+    loopCount: 0,
+    messages: [],
+    targetFilesContent: {},
+    testOutput: "",
+    testPassed: false,
+    prUrl: "",
+    prHeadBranch: "",
+    plan: "",
+    issueTitle: "",
+    issueBody: "",
+  })
     .then((finalState) => {
       console.log(
         `Finished processing ${isPr ? "PR" : "Issue"} #${issueNumber}. Intent: ${finalState.intent}`,
