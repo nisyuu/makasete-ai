@@ -40,7 +40,7 @@
     "@types/cors": "^2.8.19",
     "@types/dom-speech-recognition": "^0.0.11",
     "@types/express": "^5.0.6",
-    "@types/node": "^25.6.0",
+    "@types/node": "^25.9.1",
     "@typescript-eslint/eslint-plugin": "^8.59.4",
     "@typescript-eslint/parser": "^8.59.4",
     "concurrently": "^9.2.1",
