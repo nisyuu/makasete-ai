@@ -1,3 +1,4 @@
+/*
 import { Octokit } from "@octokit/rest";
 import { ChatAnthropic } from "@langchain/anthropic";
 import { StateGraph, START, END, Annotation } from "@langchain/langgraph";
@@ -112,7 +113,7 @@ const chatNode = async (state: AgentStateSchema) => {
   console.log("--- Chatting ---");
   const response = await model.invoke([
     ...state.messages,
-    new HumanMessage(`Provide a helpful response to the user's question or comment in JAPANESE. 
+    new HumanMessage(`Provide a helpful response to the user's question or comment in JAPANESE.
 Since you are NOT going to modify any code, focus on explanation, advice, or answering the question based on your knowledge of the project.
 If they asked to implement something but you chose CHAT, explain why (e.g., instructions were unclear).`),
   ]);
@@ -133,7 +134,7 @@ const planNode = async (state: AgentStateSchema) => {
   console.log("--- Planning ---");
   // Use find to search codebase including root level
   const fileList = runCmd(
-    "find . -maxdepth 2 -not -path '*/.*' && find server -maxdepth 2 -not -path '*/.*' && find widget -maxdepth 2 -not -path '*/.*'",
+    "find . -maxdepth 2 -not -path '* /.*' && find server -maxdepth 2 -not -path '* /.*' && find widget -maxdepth 2 -not -path '* /.*'",
   );
 
   const response = await model.invoke([
@@ -142,8 +143,8 @@ const planNode = async (state: AgentStateSchema) => {
 Codebase structure:
 ${fileList}
 
-Respond with a plan in JAPANESE. 
-IMPORTANT: 
+Respond with a plan in JAPANESE.
+IMPORTANT:
 - DO NOT modify configuration files (e.g., package.json, vitest.config.ts, next.config.js, tsconfig.json) unless the issue SPECIFICALLY requests it.
 - Respect the existing project structure and conventions.
 - If you need to create a new file, specify it in FILES_TO_MODIFY.
@@ -165,7 +166,7 @@ const loadFiles = async (state: AgentStateSchema) => {
   const match = state.plan.match(/FILES_TO_MODIFY:\s*(.*)/i);
   const paths = (match ? match[1] : "")
     .split(/,|\n/)
-    .map((p) => p.trim().replace(/^[-*]\s*/, "")) // handle bullets
+    .map((p) => p.trim().replace(/^[-*]\s* /, "")) // handle bullets
     .filter((p) => p.length > 0 && !p.includes(" "));
 
   const targetFilesContent: Record<string, string> = {};
@@ -204,7 +205,7 @@ const writeCode = async (state: AgentStateSchema) => {
   ]);
 
   const content = response.content as string;
-  const fileBlocks = content.split(/FILE:\s*/).slice(1); // ignore preamble
+  const fileBlocks = content.split(/FILE:\s* /).slice(1); // ignore preamble
 
   const updatedFiles: Record<string, string> = { ...state.targetFilesContent };
   for (const block of fileBlocks) {
@@ -240,8 +241,6 @@ const runCmdWithStatus = (cmd: string) => {
     return { output: (e.stdout ?? "") + (e.stderr ?? ""), passed: false };
   }
 };
-
-// ... (fetchIssue, planNode, loadFiles, writeCode ...)
 
 const runTests = async () => {
   console.log("--- Running Tests ---");
@@ -434,3 +433,4 @@ if (require.main === module) {
       process.exit(1);
     });
 }
+*/
