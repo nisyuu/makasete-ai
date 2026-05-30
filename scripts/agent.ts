@@ -134,7 +134,7 @@ const planNode = async (state: AgentStateSchema) => {
   console.log("--- Planning ---");
   // Use find to search codebase including root level
   const fileList = runCmd(
-    "find . -maxdepth 2 -not -path '*/.*' && find server -maxdepth 2 -not -path '*/.*' && find widget -maxdepth 2 -not -path '*/.*'",
+    "find . -maxdepth 2 -not -path '* /.*' && find server -maxdepth 2 -not -path '* /.*' && find widget -maxdepth 2 -not -path '* /.*'",
   );
 
   const response = await model.invoke([
@@ -166,7 +166,7 @@ const loadFiles = async (state: AgentStateSchema) => {
   const match = state.plan.match(/FILES_TO_MODIFY:\s*(.*)/i);
   const paths = (match ? match[1] : "")
     .split(/,|\n/)
-    .map((p) => p.trim().replace(/^[-*]\s*/, "")) // handle bullets
+    .map((p) => p.trim().replace(/^[-*]\s* /, "")) // handle bullets
     .filter((p) => p.length > 0 && !p.includes(" "));
 
   const targetFilesContent: Record<string, string> = {};
@@ -205,7 +205,7 @@ const writeCode = async (state: AgentStateSchema) => {
   ]);
 
   const content = response.content as string;
-  const fileBlocks = content.split(/FILE:\s*/).slice(1); // ignore preamble
+  const fileBlocks = content.split(/FILE:\s* /).slice(1); // ignore preamble
 
   const updatedFiles: Record<string, string> = { ...state.targetFilesContent };
   for (const block of fileBlocks) {
