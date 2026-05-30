@@ -20,7 +20,7 @@
     "tsx": "tsx"
   },
   "dependencies": {
-    "@elevenlabs/elevenlabs-js": "^2.45.0",
+    "@elevenlabs/elevenlabs-js": "^2.49.1",
     "@google/generative-ai": "^0.24.1",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
