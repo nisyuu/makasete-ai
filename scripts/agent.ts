@@ -1,3 +1,4 @@
+/*
 import { Octokit } from "@octokit/rest";
 import Anthropic from "@anthropic-ai/sdk";
 import { execSync } from "child_process";
@@ -480,3 +481,4 @@ if (require.main === module) {
       process.exit(1);
     });
 }
+*/
