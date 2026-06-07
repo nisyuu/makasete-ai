@@ -105,6 +105,84 @@ fetchAllSheets().then(() => {
   logger.info("Initial data fetch (all sheets) complete.");
 });
 
+// WebSocket logic
+io.on("connection", (socket) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const chatHistory: any[] = [];
+
+  socket.on(
+    "user-input",
+    async (data: { text: string; isVoiceInput: boolean }) => {
+      const { text, isVoiceInput } = data;
+
+      if (!text || typeof text !== "string" || text.length > 1000) {
+        socket.emit("error", { message: "Input is invalid" });
+        return;
+      }
+
+      chatHistory.push({ role: "user", parts: [{ text }] });
+
+      if (chatHistory.length > 20) {
+        chatHistory.splice(0, 2);
+      }
+
+      const streamBuffer = new StreamBuffer();
+
+      try {
+        // 1. Fetch sheet data in the orchestration layer and inject into Gemini service
+        const allData = getAllSheetData();
+
+        // 2. Get Gemini Stream, passing sheet data via dependency injection
+        const stream = await generateResponseStream(text, allData, chatHistory);
+        const ttsService = getTTSService();
+
+        let fullResponseText = "";
+
+        for await (const chunk of stream) {
+          const chunkText = chunk.text();
+          fullResponseText += chunkText;
+
+          // Buffer and split by sentences
+          const sentences = streamBuffer.add(chunkText);
+
+          for (const sentence of sentences) {
+            await processSentence(socket, sentence, isVoiceInput, ttsService);
+          }
+        }
+
+        // Flush remaining buffer
+        const remaining = streamBuffer.flush();
+        if (remaining) {
+          await processSentence(socket, remaining, isVoiceInput, ttsService);
+        }
+
+        // Add model response to history
+        chatHistory.push({
+          role: "model",
+          parts: [{ text: fullResponseText }],
+        });
+
+        // Signal end of turn
+        socket.emit("response-complete");
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error("Error processing input:", message);
+        socket.emit("error", { message: "Internal server error occurred." });
+      }
+    },
+  );
+
+  socket.on("disconnect", () => {
+    const clientIp = getClientIp(socket);
+    const count = socketConnections.get(clientIp);
+    if (count && count > 1) {
+      socketConnections.set(clientIp, count - 1);
+    } else {
+      socketConnections.delete(clientIp);
+    }
+  });
+});
+
 // Dependency injection (Composition Root)
 const chatService = new ChatService();
 const ttsService = new TTSService();

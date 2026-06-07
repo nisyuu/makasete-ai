@@ -2,8 +2,7 @@ name: CI
 
 on:
   pull_request:
-    branches: [ main, develop ]
-  workflow_dispatch:
+    branches: [main, develop]
 
 jobs:
   quality-check:
@@ -16,12 +15,10 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '24'
+          node-version: "24"
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v5
-        with:
-          version: 10
+        uses: pnpm/action-setup@v6
 
       - name: Get pnpm store directory
         shell: bash

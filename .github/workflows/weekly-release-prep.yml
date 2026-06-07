@@ -1,0 +1,138 @@
+name: Weekly Release Preparation
+
+on:
+  schedule:
+    # Every Friday at 16:00 JST (07:00 UTC)
+    - cron: '0 7 * * 5'
+  workflow_dispatch:
+
+jobs:
+  prepare_release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: develop
+
+      - name: Generate Release Notes
+        id: release_notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # origin/main is used since only develop is checked out locally
+          LAST_MAIN_COMMIT=$(git merge-base origin/main develop)
+          COMMITS=$(git log --pretty=format:"%H %s" "$LAST_MAIN_COMMIT"..develop)
+
+          if [ -z "$COMMITS" ]; then
+            RELEASE_NOTES="（今週の変更なし）"
+          else
+            RELEASE_NOTES=""
+            while IFS= read -r line; do
+              COMMIT=$(echo "$line" | cut -d' ' -f1)
+              MSG=$(echo "$line" | cut -d' ' -f2-)
+              # Look up PR number via GitHub commits API
+              PR_NUM=$(gh api "repos/${{ github.repository }}/commits/$COMMIT/pulls" \
+                --jq '.[0].number // empty' 2>/dev/null || echo "")
+              if [ -n "$PR_NUM" ]; then
+                RELEASE_NOTES="${RELEASE_NOTES}- #${PR_NUM}: ${MSG}\n"
+              else
+                RELEASE_NOTES="${RELEASE_NOTES}- ${MSG}\n"
+              fi
+            done <<< "$COMMITS"
+          fi
+
+          DELIMITER="EOF_$(uuidgen | tr -d '-')"
+          {
+            echo "notes<<$DELIMITER"
+            printf "%b" "$RELEASE_NOTES"
+            echo "$DELIMITER"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check develop has new commits
+        id: check_changes
+        run: |
+          LAST_MAIN_COMMIT=$(git merge-base origin/main develop)
+          HEAD_COMMIT=$(git rev-parse develop)
+          if [ "$LAST_MAIN_COMMIT" = "$HEAD_COMMIT" ]; then
+            echo "status=no_changes" >> "$GITHUB_OUTPUT"
+            echo "develop has no new commits since last release. Skipping PR creation."
+          else
+            echo "status=ready" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create Release Pull Request
+        if: steps.check_changes.outputs.status == 'ready'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TZ: Asia/Tokyo
+          RELEASE_NOTES: ${{ steps.release_notes.outputs.notes }}
+        run: |
+          RELEASE_DATE=$(date +'%Y/%m/%d')
+          RELEASE_WEEK=$(date +'Week %V')
+          PR_TITLE="🚀 Release: $RELEASE_DATE ($RELEASE_WEEK)"
+
+          {
+            echo "## Release Checklist"
+            echo ""
+            echo "### ✅ Pre-Release Tasks"
+            echo "- [ ] All tests pass (CI green)"
+            echo "- [ ] Code review completed"
+            echo "- [ ] Security review completed"
+            echo "- [ ] Documentation updated"
+            echo ""
+            echo "### 📝 Changes This Week"
+            echo "$RELEASE_NOTES"
+            echo ""
+            echo "### 🔐 Security Checks"
+            echo "- [ ] No hardcoded credentials"
+            echo "- [ ] No security regressions"
+            echo "- [ ] Rate limiting intact"
+            echo "- [ ] Shadow DOM isolation maintained"
+            echo ""
+            echo "### 📊 Quality Metrics"
+            echo "- Merged PRs this week: Count checked by CI"
+            echo "- Test coverage: Maintained or improved"
+            echo "- Performance: No regressions"
+            echo ""
+            echo "### 🚀 Release Approval"
+            echo ""
+            echo "**Status**: ⏳ Awaiting Manual Approval"
+            echo ""
+            echo "Once all checks pass, the repository owner should **approve and merge** this PR to trigger:"
+            echo "1. Docker build and push to Cloud Run"
+            echo "2. Terraform deployment"
+            echo "3. Release notification to clients"
+            echo ""
+            echo "---"
+            echo ""
+            echo "**Automatic Deploy Command**:"
+            echo "After merging to \`main\`, deployment happens via Cloud Build trigger."
+            echo ""
+            echo "For manual release notes or client notification, see the GAS script in \`/gas/main.js\`."
+          } > /tmp/pr_body.md
+
+          EXISTING_PR=$(gh pr list \
+            --base main \
+            --head develop \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty' 2>/dev/null || echo "")
+
+          if [ -z "$EXISTING_PR" ]; then
+            gh pr create \
+              -B main \
+              -H develop \
+              --title "$PR_TITLE" \
+              --body-file /tmp/pr_body.md \
+              --reviewer "${{ github.repository_owner }}" \
+              --label "release,ready-for-review"
+          else
+            echo "Release PR already exists: #$EXISTING_PR"
+            echo "Update it manually or close it to create a new one."
+          fi
