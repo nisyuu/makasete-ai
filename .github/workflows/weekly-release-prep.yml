@@ -25,34 +25,47 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Get all PRs merged to develop since last main merge
-          LAST_MAIN_COMMIT=$(git merge-base main develop)
-          RELEASE_NOTES=$(git log --pretty=format:"%h - %s" $LAST_MAIN_COMMIT..develop | \
-            while read commit_info; do
-              COMMIT=$(echo "$commit_info" | cut -d' ' -f1)
-              MSG=$(echo "$commit_info" | cut -d'-' -f2-)
-              PR_NUM=$(gh pr list --state merged --search "merge:$COMMIT" --json number --jq '.[0].number' 2>/dev/null || echo "")
+          # origin/main is used since only develop is checked out locally
+          LAST_MAIN_COMMIT=$(git merge-base origin/main develop)
+          COMMITS=$(git log --pretty=format:"%H %s" $LAST_MAIN_COMMIT..develop)
+
+          if [ -z "$COMMITS" ]; then
+            RELEASE_NOTES="（今週の変更なし）"
+          else
+            RELEASE_NOTES=""
+            while IFS= read -r line; do
+              COMMIT=$(echo "$line" | cut -d' ' -f1)
+              MSG=$(echo "$line" | cut -d' ' -f2-)
+              # Look up PR number via GitHub commits API
+              PR_NUM=$(gh api "repos/${{ github.repository }}/commits/$COMMIT/pulls" \
+                --jq '.[0].number // empty' 2>/dev/null || echo "")
               if [ -n "$PR_NUM" ]; then
-                echo "- #$PR_NUM:$MSG"
+                RELEASE_NOTES="${RELEASE_NOTES}- #${PR_NUM}: ${MSG}\n"
               else
-                echo "- $MSG"
+                RELEASE_NOTES="${RELEASE_NOTES}- ${MSG}\n"
               fi
-            done || echo "No commits since last release")
+            done <<< "$COMMITS"
+          fi
 
-          echo "notes<<EOF" >> $GITHUB_OUTPUT
-          echo "$RELEASE_NOTES" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          DELIMITER="EOF_$(uuidgen | tr -d '-')"
+          echo "notes<<$DELIMITER" >> $GITHUB_OUTPUT
+          printf "%b" "$RELEASE_NOTES" >> $GITHUB_OUTPUT
+          echo "$DELIMITER" >> $GITHUB_OUTPUT
 
-      - name: Check for ready-to-release PRs
-        id: check_tests
+      - name: Check develop has new commits
+        id: check_changes
         run: |
-          # Check if develop branch is stable
-          # This is a placeholder - replace with your actual test command
-          echo "Tests should be run before this step"
-          echo "status=ready" >> $GITHUB_OUTPUT
+          LAST_MAIN_COMMIT=$(git merge-base origin/main develop)
+          HEAD_COMMIT=$(git rev-parse develop)
+          if [ "$LAST_MAIN_COMMIT" = "$HEAD_COMMIT" ]; then
+            echo "status=no_changes" >> $GITHUB_OUTPUT
+            echo "develop has no new commits since last release. Skipping PR creation."
+          else
+            echo "status=ready" >> $GITHUB_OUTPUT
+          fi
 
       - name: Create Release Pull Request
-        if: steps.check_tests.outputs.status == 'ready'
+        if: steps.check_changes.outputs.status == 'ready'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TZ: 'Asia/Tokyo'
@@ -63,53 +76,52 @@ jobs:
           PR_TITLE="🚀 Release: $RELEASE_DATE ($RELEASE_WEEK)"
 
           PR_BODY=$(cat <<'BODY'
-          ## Release Checklist
+## Release Checklist
 
-          ### ✅ Pre-Release Tasks
-          - [ ] All tests pass (CI green)
-          - [ ] Code review completed
-          - [ ] Security review completed
-          - [ ] Documentation updated
+### ✅ Pre-Release Tasks
+- [ ] All tests pass (CI green)
+- [ ] Code review completed
+- [ ] Security review completed
+- [ ] Documentation updated
 
-          ### 📝 Changes This Week
-          ${{ steps.release_notes.outputs.notes }}
+### 📝 Changes This Week
+${{ steps.release_notes.outputs.notes }}
 
-          ### 🔐 Security Checks
-          - [ ] No hardcoded credentials
-          - [ ] No security regressions
-          - [ ] Rate limiting intact
-          - [ ] Shadow DOM isolation maintained
+### 🔐 Security Checks
+- [ ] No hardcoded credentials
+- [ ] No security regressions
+- [ ] Rate limiting intact
+- [ ] Shadow DOM isolation maintained
 
-          ### 📊 Quality Metrics
-          - Merged PRs this week: Count checked by CI
-          - Test coverage: Maintained or improved
-          - Performance: No regressions
+### 📊 Quality Metrics
+- Merged PRs this week: Count checked by CI
+- Test coverage: Maintained or improved
+- Performance: No regressions
 
-          ### 🚀 Release Approval
+### 🚀 Release Approval
 
-          **Status**: ⏳ Awaiting Manual Approval
+**Status**: ⏳ Awaiting Manual Approval
 
-          Once all checks pass, the repository owner should **approve and merge** this PR to trigger:
-          1. Docker build and push to Cloud Run
-          2. Terraform deployment
-          3. Release notification to clients
+Once all checks pass, the repository owner should **approve and merge** this PR to trigger:
+1. Docker build and push to Cloud Run
+2. Terraform deployment
+3. Release notification to clients
 
-          ---
+---
 
-          **Automatic Deploy Command**:
-          After merging to `main`, deployment happens via Cloud Build trigger.
+**Automatic Deploy Command**:
+After merging to `main`, deployment happens via Cloud Build trigger.
 
-          For manual release notes or client notification, see the GAS script in `/gas/main.js`.
-          BODY
+For manual release notes or client notification, see the GAS script in `/gas/main.js`.
+BODY
           )
 
-          # Create or update the release PR
           EXISTING_PR=$(gh pr list \
             --base main \
             --head develop \
             --state open \
             --json number \
-            --jq '.[0].number' 2>/dev/null || echo "")
+            --jq '.[0].number // empty' 2>/dev/null || echo "")
 
           if [ -z "$EXISTING_PR" ]; then
             gh pr create \
