@@ -121,7 +121,45 @@ jobs:
             echo "Claude will create detailed implementation plans for each item."
           } > /tmp/issue_body.md
 
-          gh issue create \
+          ISSUE_URL=$(gh issue create \
             --title "$SPRINT_TITLE" \
             --body-file /tmp/issue_body.md \
-            --label "sprint-planning,sprint"
+            --label "sprint-planning,sprint")
+          ISSUE_NUMBER=$(echo "$ISSUE_URL" | grep -o '[0-9]*$')
+
+          {
+            echo "@claude"
+            echo ""
+            echo "You are a product strategist for **Makasete AI** — a spreadsheet-driven AI chatbot"
+            echo "for Japanese e-commerce and service sites, featuring real-time voice interaction"
+            echo "and low-latency streaming TTS."
+            echo ""
+            echo "## Phase 1: Competitive & Market Research"
+            echo ""
+            echo "Search the web and gather insights on the following:"
+            echo ""
+            echo "1. **Competitor products** — Search for AI chatbot / voice assistant solutions"
+            echo "   targeting Japanese e-commerce (keywords: 'ECサイト AIチャットボット', 'AI voice"
+            echo "   assistant ecommerce Japan', 'shopify chatbot AI Japan 2025'). For each"
+            echo "   competitor found, note: key features, pricing model, and gaps."
+            echo ""
+            echo "2. **Market trends** — Search for recent trends in conversational AI and voice"
+            echo "   commerce (keywords: 'voice commerce trends 2025', 'AI chatbot ecommerce"
+            echo "   conversion rate', 'LLM customer support SaaS 2025'). Identify 2-3 trends"
+            echo "   most relevant to Makasete AI."
+            echo ""
+            echo "## Phase 2: Feature Proposals"
+            echo ""
+            echo "Based on your research AND the open issues listed in this sprint planning issue,"
+            echo "propose 3-5 feature candidates for this week's sprint."
+            echo ""
+            echo "For each proposal, provide:"
+            echo "- **Feature name** (one line)"
+            echo "- **Why now** — competitive gap, market trend, or user pain point driving it"
+            echo "- **Scope estimate** — S / M / L (S = 1 day, M = 2-3 days, L = 4-5 days)"
+            echo "- **Success metric** — how we know it worked"
+            echo ""
+            echo "Rank proposals by impact-to-effort ratio. Reply in Japanese."
+          } > /tmp/claude_comment.md
+
+          gh issue comment "$ISSUE_NUMBER" --body-file /tmp/claude_comment.md
