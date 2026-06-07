@@ -1,6 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { config } from "../config";
-import { getInternalSheetData, getSystemPrompt, SheetData } from "./sheets";
+import { getSystemPrompt, SheetData } from "./sheets";
 
 let genAI: GoogleGenerativeAI;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -49,17 +49,19 @@ ${dynamicContext}
 
 /**
  * Generates a text response stream from Gemini.
+ * Accepts sheet data via dependency injection instead of fetching it internally.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function generateResponseStream(prompt: string, history: any[] = []) {
+export async function generateResponseStream(
+    prompt: string,
+    allData: Map<string, SheetData[]>,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    history: any[] = []
+) {
     if (!model) {
         initGemini();
     }
 
-    // Get all data from sheets
     const basePrompt = getSystemPrompt() || `あなたは親切なAIアシスタントです。`;
-    const allData = getInternalSheetData();
-
     const systemInstruction = buildSystemInstruction(basePrompt, allData);
 
     try {
