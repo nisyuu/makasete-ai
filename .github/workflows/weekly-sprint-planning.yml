@@ -121,7 +121,22 @@ jobs:
             echo "Claude will create detailed implementation plans for each item."
           } > /tmp/issue_body.md
 
-          gh issue create \
+          ISSUE_URL=$(gh issue create \
             --title "$SPRINT_TITLE" \
             --body-file /tmp/issue_body.md \
-            --label "sprint-planning,sprint"
+            --label "sprint-planning,sprint")
+          ISSUE_NUMBER=$(echo "$ISSUE_URL" | grep -o '[0-9]*$')
+
+          {
+            echo "@claude"
+            echo "このリポジトリの open Issue リストと前週のリリース内容を踏まえて、今週のスプリントで取り組むべき候補を3〜5件提案してください。"
+            echo ""
+            echo "提案の際は以下の観点で優先順位をつけてください："
+            echo "- ユーザー体験への影響（音声対話の低遅延・安定性など）"
+            echo "- 実装コストに対する効果"
+            echo "- 技術的負債の解消"
+            echo ""
+            echo "各候補について「なぜ今週やるべきか」を一言で添えてください。"
+          } > /tmp/claude_comment.md
+
+          gh issue comment "$ISSUE_NUMBER" --body-file /tmp/claude_comment.md
