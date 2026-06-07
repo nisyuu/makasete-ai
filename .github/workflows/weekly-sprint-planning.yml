@@ -42,12 +42,14 @@ jobs:
             --jq '.[] | "- #\(.number): \(.title)"' || echo "（先週マージされたPRなし）")
 
           DELIMITER="EOF_$(uuidgen | tr -d '-')"
-          echo "last_pr<<$DELIMITER" >> $GITHUB_OUTPUT
-          echo "$LAST_PR" >> $GITHUB_OUTPUT
-          echo "$DELIMITER" >> $GITHUB_OUTPUT
-          echo "merged_prs<<$DELIMITER" >> $GITHUB_OUTPUT
-          echo "$MERGED_PRS" >> $GITHUB_OUTPUT
-          echo "$DELIMITER" >> $GITHUB_OUTPUT
+          {
+            echo "last_pr<<$DELIMITER"
+            echo "$LAST_PR"
+            echo "$DELIMITER"
+            echo "merged_prs<<$DELIMITER"
+            echo "$MERGED_PRS"
+            echo "$DELIMITER"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Get open feature requests
         id: open_issues
@@ -63,59 +65,63 @@ jobs:
             --jq '.[] | "- #\(.number): \(.title)"' || echo "（対象Issueなし）")
 
           DELIMITER="EOF_$(uuidgen | tr -d '-')"
-          echo "features<<$DELIMITER" >> $GITHUB_OUTPUT
-          echo "$OPEN_FEATURES" >> $GITHUB_OUTPUT
-          echo "$DELIMITER" >> $GITHUB_OUTPUT
+          {
+            echo "features<<$DELIMITER"
+            echo "$OPEN_FEATURES"
+            echo "$DELIMITER"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Create Sprint Planning Issue
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TZ: 'Asia/Tokyo'
+          TZ: Asia/Tokyo
+          LAST_PR: ${{ steps.release_info.outputs.last_pr }}
+          MERGED_PRS: ${{ steps.release_info.outputs.merged_prs }}
+          OPEN_FEATURES: ${{ steps.open_issues.outputs.features }}
         run: |
           WEEK_NUM=$(date +'Week %V')
           SPRINT_TITLE="Sprint Planning - $(date +'%Y/%m/%d') ($WEEK_NUM)"
 
-          ISSUE_BODY=$(cat <<'BODY'
-## 📋 Sprint Overview
-
-**Sprint Goal**: Deliver value through planned feature development and bug fixes
-
-### 📊 Previous Week Summary
-
-**Last Released**:
-${{ steps.release_info.outputs.last_pr }}
-
-**Merged PRs this past week**:
-${{ steps.release_info.outputs.merged_prs }}
-
-### 🎯 Candidates for This Week
-
-**Open Feature Requests**:
-${{ steps.open_issues.outputs.features }}
-
-### 📝 Planning Tasks
-
-- [ ] **Review** previous week's feedback and metrics
-- [ ] **Select** 3-5 features/fixes for this sprint
-- [ ] **Assign** tasks to developers
-- [ ] **Comment** with approved sprint scope: `@claude plan`
-
-### 💬 Next Steps
-
-Once you've finalized the scope, mention `@claude` in a comment:
-```
-@claude plan
-Selected features for this sprint:
-1. Feature A
-2. Feature B
-3. Bug fix C
-```
-
-Claude will create detailed implementation plans for each item.
-BODY
-          )
+          {
+            echo "## 📋 Sprint Overview"
+            echo ""
+            echo "**Sprint Goal**: Deliver value through planned feature development and bug fixes"
+            echo ""
+            echo "### 📊 Previous Week Summary"
+            echo ""
+            echo "**Last Released**:"
+            echo "$LAST_PR"
+            echo ""
+            echo "**Merged PRs this past week**:"
+            echo "$MERGED_PRS"
+            echo ""
+            echo "### 🎯 Candidates for This Week"
+            echo ""
+            echo "**Open Feature Requests**:"
+            echo "$OPEN_FEATURES"
+            echo ""
+            echo "### 📝 Planning Tasks"
+            echo ""
+            echo "- [ ] **Review** previous week's feedback and metrics"
+            echo "- [ ] **Select** 3-5 features/fixes for this sprint"
+            echo "- [ ] **Assign** tasks to developers"
+            echo "- [ ] **Comment** with approved sprint scope: \`@claude plan\`"
+            echo ""
+            echo "### 💬 Next Steps"
+            echo ""
+            echo "Once you've finalized the scope, mention \`@claude\` in a comment:"
+            echo '```'
+            echo "@claude plan"
+            echo "Selected features for this sprint:"
+            echo "1. Feature A"
+            echo "2. Feature B"
+            echo "3. Bug fix C"
+            echo '```'
+            echo ""
+            echo "Claude will create detailed implementation plans for each item."
+          } > /tmp/issue_body.md
 
           gh issue create \
             --title "$SPRINT_TITLE" \
-            --body "$ISSUE_BODY" \
+            --body-file /tmp/issue_body.md \
             --label "sprint-planning,sprint"
