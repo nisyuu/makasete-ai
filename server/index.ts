@@ -1,76 +1,117 @@
-import express from 'express';
-import { createServer } from 'http';
-import { Server } from 'socket.io';
-import cors from 'cors';
-import path from 'path';
-import { ResponseOrchestrator } from './services/responseOrchestrator';
-import { AIService } from './services/aiService';
-import { registerSocketHandlers } from './handlers/socketHandlers';
-import { logger } from './utils/logger';
+import express, { Request, Response } from "express";
+import { createServer } from "http";
+import { Server } from "socket.io";
+import cors from "cors";
+import path from "path";
+import { rateLimit } from "express-rate-limit";
+import { config } from "./config";
+import {
+  fetchAllSheets,
+  getAllSheetData,
+  dataReadyPromise,
+} from "./services/sheets";
+import { ChatService } from "./services/chatService";
+import { TTSService } from "./services/ttsService";
+import { ResponseOrchestrator } from "./services/responseOrchestrator";
+import { registerSocketHandlers } from "./handlers/socketHandlers";
 
 const app = express();
+
+// Security: Trust proxy for Cloud Run to get correct client IP for rate limiting
+app.set("trust proxy", 1);
+
+// Security: Use environment variable for allowed origins
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.includes(",")
+    ? process.env.ALLOWED_ORIGINS.split(",")
+    : process.env.ALLOWED_ORIGINS
+  : "*";
+
+// 1. CORS Middleware (Must be FIRST)
+app.use(
+  cors({
+    origin: allowedOrigins,
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true,
+  }),
+);
+
+// Security: Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  limit: 100,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: "Too many requests from this IP, please try again later.",
+});
+
+app.use(limiter);
+
 const httpServer = createServer(app);
 
 const io = new Server(httpServer, {
   cors: {
-    origin: process.env.CORS_ORIGIN || '*',
-    methods: ['GET', 'POST'],
+    origin: allowedOrigins,
+    methods: ["GET", "POST"],
   },
 });
 
-app.use(cors());
+// Middleware
 app.use(express.json());
-app.use(express.static(path.join(__dirname, '../public')));
 
-const aiService = new AIService({
-  apiKey: process.env.OPENAI_API_KEY || '',
-  model: process.env.AI_MODEL || 'gpt-3.5-turbo',
-  maxTokens: parseInt(process.env.MAX_TOKENS || '1024', 10),
-  temperature: parseFloat(process.env.TEMPERATURE || '0.7'),
+// Static files (Widget)
+app.use("/public", express.static(path.join(process.cwd(), "dist/public")));
+
+// Demo Page
+app.get("/demo", (req: Request, res: Response) => {
+  res.sendFile(path.join(process.cwd(), "dist/public/demo.html"));
 });
 
-const orchestrator = new ResponseOrchestrator(aiService);
+app.get("/health", async (req: Request, res: Response) => {
+  await dataReadyPromise;
+  res.json({ status: "ready" });
+});
 
-// REST API routes
-app.post('/api/chat', async (req, res) => {
-  try {
-    const { conversationId, message, systemPrompt } = req.body as {
-      conversationId?: string;
-      message: string;
-      systemPrompt?: string;
-    };
+// API Endpoints
+app.get("/api/:sheetName", async (req: Request, res: Response) => {
+  await dataReadyPromise;
+  const { sheetName } = req.params;
 
-    if (!message) {
-      res.status(400).json({ error: 'Message is required' });
-      return;
-    }
+  if (typeof sheetName !== "string") {
+    return res.status(400).json({ error: "Invalid sheet name" });
+  }
 
-    const result = await orchestrator.processMessage(conversationId, message, systemPrompt);
+  // Security: Do not expose the prompt sheet via API
+  if (sheetName === "prompt") {
+    return res.status(404).json({ error: "Sheet 'prompt' not found" });
+  }
 
-    res.json({
-      conversationId: result.conversationId,
-      message: result.response,
-      role: 'assistant',
-    });
-  } catch (error) {
-    logger.error('Error in /api/chat', error);
-    res.status(500).json({ error: 'Internal server error' });
+  const data = getAllSheetData();
+  const sheetData = data.get(sheetName);
+
+  if (sheetData) {
+    res.json(sheetData);
+  } else {
+    res.status(404).json({ error: `Sheet '${sheetName}' not found` });
   }
 });
 
-app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+// Initialize sheet data cache
+fetchAllSheets().then(() => {
+  console.log("Initial data fetch (all sheets) complete.");
 });
 
-// Socket.IO connection handler
-io.on('connection', (socket) => {
-  registerSocketHandlers(io, socket, orchestrator);
-});
+// Dependency injection (Composition Root)
+const chatService = new ChatService();
+const ttsService = new TTSService();
+const orchestrator = new ResponseOrchestrator(chatService, ttsService);
 
-const PORT = parseInt(process.env.PORT || '3000', 10);
+// Register WebSocket handlers (Controller layer)
+registerSocketHandlers(io, orchestrator);
 
+// Start Server
+const PORT = config.port;
 httpServer.listen(PORT, () => {
-  logger.info(`Server running on port ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
-
-export { app, httpServer, io };

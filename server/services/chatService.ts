@@ -1,4 +1,5 @@
 import { generateResponseStream } from "./gemini";
+import { getAllSheetData } from "./sheets";
 import { StreamBuffer } from "../utils/streamBuffer";
 
 export interface ChatMessage {
@@ -16,21 +17,14 @@ export interface ChatStreamCallbacks {
  * Protocol-agnostic: no Socket.io dependency.
  */
 export class ChatService {
-  /**
-   * Streams a response for the given user message, invoking callbacks
-   * for each completed sentence and once for the full response.
-   *
-   * @param userMessage - The user's input text
-   * @param history     - The current conversation history (mutated in place)
-   * @param callbacks   - Sentence and completion callbacks
-   */
   async streamResponse(
     userMessage: string,
     history: ChatMessage[],
     callbacks: ChatStreamCallbacks,
   ): Promise<void> {
     const streamBuffer = new StreamBuffer();
-    const stream = await generateResponseStream(userMessage, history);
+    const allData = getAllSheetData();
+    const stream = await generateResponseStream(userMessage, allData, history);
 
     let fullResponseText = "";
 
@@ -44,7 +38,6 @@ export class ChatService {
       }
     }
 
-    // Flush any remaining buffered text
     const remaining = streamBuffer.flush();
     if (remaining) {
       await callbacks.onSentence(remaining);

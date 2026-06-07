@@ -1,96 +1,60 @@
-import { AIService } from './aiService';
-import { Message } from '../types';
-import { logger } from '../utils/logger';
-import { getOrCreateConversation, addMessage } from './conversationService';
+import { ChatService, ChatMessage } from "./chatService";
+import { TTSService } from "./ttsService";
+import { stripTags } from "../utils/text";
 
+export interface ProcessCallbacks {
+  onVoiceChunk?: (uiText: string, audioBuffer: Buffer) => Promise<void>;
+  onTextChunk?: (uiText: string) => void;
+  onComplete?: () => void;
+  onError?: (error: Error) => void;
+}
+
+/**
+ * Orchestrates chat response generation and TTS synthesis.
+ * Protocol-agnostic: uses callbacks instead of Socket.io directly.
+ */
 export class ResponseOrchestrator {
-  private aiService: AIService;
-
-  constructor(aiService: AIService) {
-    this.aiService = aiService;
-  }
+  constructor(
+    private readonly chatService: ChatService,
+    private readonly ttsService: TTSService,
+  ) {}
 
   async processMessage(
-    conversationId: string | undefined,
-    userMessage: string,
-    systemPrompt?: string
-  ): Promise<{ conversationId: string; response: string }> {
-    const conversation = getOrCreateConversation(conversationId);
-
-    if (systemPrompt && conversation.messages.length === 0) {
-      const systemMessage: Message = {
-        role: 'system',
-        content: systemPrompt,
-      };
-      addMessage(conversation.id, systemMessage);
+    data: { text: string; isVoiceInput: boolean },
+    history: ChatMessage[],
+    callbacks: ProcessCallbacks,
+  ): Promise<void> {
+    try {
+      await this.chatService.streamResponse(data.text, history, {
+        onSentence: async (sentence: string) => {
+          await this.processSentence(sentence, data.isVoiceInput, callbacks);
+        },
+        onComplete: (fullText: string) => {
+          history.push({ role: "model", parts: [{ text: fullText }] });
+          callbacks.onComplete?.();
+        },
+      });
+    } catch (error) {
+      callbacks.onError?.(
+        error instanceof Error ? error : new Error(String(error)),
+      );
     }
-
-    const userMsg: Message = {
-      role: 'user',
-      content: userMessage,
-    };
-    addMessage(conversation.id, userMsg);
-
-    logger.info(`Processing message for conversation ${conversation.id}`);
-
-    const response = await this.aiService.generateResponse(conversation.messages);
-
-    const assistantMsg: Message = {
-      role: 'assistant',
-      content: response,
-    };
-    addMessage(conversation.id, assistantMsg);
-
-    return {
-      conversationId: conversation.id,
-      response,
-    };
   }
 
-  async *processMessageStream(
-    conversationId: string | undefined,
-    userMessage: string,
-    systemPrompt?: string
-  ): AsyncGenerator<{ conversationId: string; chunk: string; done: boolean }, void, unknown> {
-    const conversation = getOrCreateConversation(conversationId);
+  private async processSentence(
+    sentence: string,
+    isVoiceInput: boolean,
+    callbacks: ProcessCallbacks,
+  ): Promise<void> {
+    if (isVoiceInput) {
+      const result = await this.ttsService.synthesize(sentence);
+      if (!result) return;
 
-    if (systemPrompt && conversation.messages.length === 0) {
-      const systemMessage: Message = {
-        role: 'system',
-        content: systemPrompt,
-      };
-      addMessage(conversation.id, systemMessage);
+      if (callbacks.onVoiceChunk) {
+        await callbacks.onVoiceChunk(result.uiText, result.audioBuffer);
+      }
+    } else {
+      callbacks.onTextChunk?.(stripTags(sentence));
     }
-
-    const userMsg: Message = {
-      role: 'user',
-      content: userMessage,
-    };
-    addMessage(conversation.id, userMsg);
-
-    logger.info(`Processing streaming message for conversation ${conversation.id}`);
-
-    let fullResponse = '';
-
-    for await (const chunk of this.aiService.generateResponseStream(conversation.messages)) {
-      fullResponse += chunk;
-      yield {
-        conversationId: conversation.id,
-        chunk,
-        done: false,
-      };
-    }
-
-    const assistantMsg: Message = {
-      role: 'assistant',
-      content: fullResponse,
-    };
-    addMessage(conversation.id, assistantMsg);
-
-    yield {
-      conversationId: conversation.id,
-      chunk: '',
-      done: true,
-    };
   }
 }
