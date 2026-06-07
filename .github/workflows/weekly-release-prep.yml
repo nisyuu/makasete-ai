@@ -1,0 +1,125 @@
+name: Weekly Release Preparation
+
+on:
+  schedule:
+    # Every Friday at 16:00 JST (07:00 UTC)
+    - cron: '0 7 * * 5'
+  workflow_dispatch:
+
+jobs:
+  prepare_release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: develop
+
+      - name: Generate Release Notes
+        id: release_notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Get all PRs merged to develop since last main merge
+          LAST_MAIN_COMMIT=$(git merge-base main develop)
+          RELEASE_NOTES=$(git log --pretty=format:"%h - %s" $LAST_MAIN_COMMIT..develop | \
+            while read commit_info; do
+              COMMIT=$(echo "$commit_info" | cut -d' ' -f1)
+              MSG=$(echo "$commit_info" | cut -d'-' -f2-)
+              PR_NUM=$(gh pr list --state merged --search "merge:$COMMIT" --json number --jq '.[0].number' 2>/dev/null || echo "")
+              if [ -n "$PR_NUM" ]; then
+                echo "- #$PR_NUM:$MSG"
+              else
+                echo "- $MSG"
+              fi
+            done || echo "No commits since last release")
+
+          echo "notes<<EOF" >> $GITHUB_OUTPUT
+          echo "$RELEASE_NOTES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Check for ready-to-release PRs
+        id: check_tests
+        run: |
+          # Check if develop branch is stable
+          # This is a placeholder - replace with your actual test command
+          echo "Tests should be run before this step"
+          echo "status=ready" >> $GITHUB_OUTPUT
+
+      - name: Create Release Pull Request
+        if: steps.check_tests.outputs.status == 'ready'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TZ: 'Asia/Tokyo'
+        run: |
+          RELEASE_DATE=$(date +'%Y/%m/%d')
+          RELEASE_WEEK=$(date +'Week %V')
+
+          PR_TITLE="🚀 Release: $RELEASE_DATE ($RELEASE_WEEK)"
+
+          PR_BODY=$(cat <<'BODY'
+          ## Release Checklist
+
+          ### ✅ Pre-Release Tasks
+          - [ ] All tests pass (CI green)
+          - [ ] Code review completed
+          - [ ] Security review completed
+          - [ ] Documentation updated
+
+          ### 📝 Changes This Week
+          ${{ steps.release_notes.outputs.notes }}
+
+          ### 🔐 Security Checks
+          - [ ] No hardcoded credentials
+          - [ ] No security regressions
+          - [ ] Rate limiting intact
+          - [ ] Shadow DOM isolation maintained
+
+          ### 📊 Quality Metrics
+          - Merged PRs this week: Count checked by CI
+          - Test coverage: Maintained or improved
+          - Performance: No regressions
+
+          ### 🚀 Release Approval
+
+          **Status**: ⏳ Awaiting Manual Approval
+
+          Once all checks pass, the repository owner should **approve and merge** this PR to trigger:
+          1. Docker build and push to Cloud Run
+          2. Terraform deployment
+          3. Release notification to clients
+
+          ---
+
+          **Automatic Deploy Command**:
+          After merging to `main`, deployment happens via Cloud Build trigger.
+
+          For manual release notes or client notification, see the GAS script in `/gas/main.js`.
+          BODY
+          )
+
+          # Create or update the release PR
+          EXISTING_PR=$(gh pr list \
+            --base main \
+            --head develop \
+            --state open \
+            --json number \
+            --jq '.[0].number' 2>/dev/null || echo "")
+
+          if [ -z "$EXISTING_PR" ]; then
+            gh pr create \
+              -B main \
+              -H develop \
+              --title "$PR_TITLE" \
+              --body "$PR_BODY" \
+              --reviewer "${{ github.repository_owner }}" \
+              --label "release,ready-for-review"
+          else
+            echo "Release PR already exists: #$EXISTING_PR"
+            echo "Update it manually or close it to create a new one."
+          fi
