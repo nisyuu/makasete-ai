@@ -14,18 +14,21 @@ import { ChatService } from "./services/chatService";
 import { TTSService } from "./services/ttsService";
 import { ResponseOrchestrator } from "./services/responseOrchestrator";
 import { registerSocketHandlers } from "./handlers/socketHandlers";
+import { logger } from "./utils/logger";
 
 const app = express();
 
 // Security: Trust proxy for Cloud Run to get correct client IP for rate limiting
 app.set("trust proxy", 1);
 
+function parseAllowedOrigins(): string | string[] {
+  const raw = process.env.ALLOWED_ORIGINS;
+  if (!raw) return "*";
+  return raw.includes(",") ? raw.split(",") : raw;
+}
+
 // Security: Use environment variable for allowed origins
-const allowedOrigins = process.env.ALLOWED_ORIGINS
-  ? process.env.ALLOWED_ORIGINS.includes(",")
-    ? process.env.ALLOWED_ORIGINS.split(",")
-    : process.env.ALLOWED_ORIGINS
-  : "*";
+const allowedOrigins = parseAllowedOrigins();
 
 // 1. CORS Middleware (Must be FIRST)
 app.use(
@@ -99,7 +102,7 @@ app.get("/api/:sheetName", async (req: Request, res: Response) => {
 
 // Initialize sheet data cache
 fetchAllSheets().then(() => {
-  console.log("Initial data fetch (all sheets) complete.");
+  logger.info("Initial data fetch (all sheets) complete.");
 });
 
 // Dependency injection (Composition Root)
@@ -113,5 +116,5 @@ registerSocketHandlers(io, orchestrator);
 // Start Server
 const PORT = config.port;
 httpServer.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  logger.info(`Server running on port ${PORT}`);
 });

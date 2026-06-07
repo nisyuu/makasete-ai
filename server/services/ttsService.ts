@@ -6,6 +6,7 @@ import {
   hasTags,
   removeMarkdownLinks,
 } from "../utils/text";
+import { logger } from "../utils/logger";
 
 export interface TTSResult {
   /** UI-safe plain text (tags stripped) */
@@ -69,7 +70,7 @@ export class TTSService {
       stream.on("data", (chunk: Buffer) => chunks.push(chunk));
       stream.on("end", () => resolve(Buffer.concat(chunks)));
       stream.on("error", (err) => {
-        console.error("[TTS] Stream error:", err);
+        logger.error("[TTS] Stream error:", err);
         reject(err);
       });
     });

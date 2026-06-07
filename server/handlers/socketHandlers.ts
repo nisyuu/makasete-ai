@@ -1,6 +1,10 @@
 import { Server, Socket } from "socket.io";
 import { ResponseOrchestrator } from "../services/responseOrchestrator";
 import { ChatMessage } from "../services/chatService";
+import { logger } from "../utils/logger";
+
+// Throttle audio emissions to avoid overwhelming the client WebSocket buffer
+const AUDIO_EMIT_DELAY_MS = 50;
 
 function getClientIp(socket: Socket): string {
   const forwarded = socket.handshake.headers["x-forwarded-for"];
@@ -10,6 +14,28 @@ function getClientIp(socket: Socket): string {
     ).trim();
   }
   return socket.handshake.address;
+}
+
+function validateInput(text: unknown): text is string {
+  return !!text && typeof text === "string" && text.length <= 1000;
+}
+
+function trimHistory(history: ChatMessage[]): void {
+  if (history.length > 20) {
+    history.splice(0, 2);
+  }
+}
+
+async function emitVoiceChunk(
+  socket: Socket,
+  uiText: string,
+  audioBuffer: Buffer,
+): Promise<void> {
+  socket.emit("audio-chunk", { type: "text", content: uiText });
+  await new Promise<void>((resolve) => {
+    socket.emit("audio-chunk", { type: "audio", content: audioBuffer });
+    setTimeout(resolve, AUDIO_EMIT_DELAY_MS);
+  });
 }
 
 /**
@@ -41,31 +67,20 @@ export function registerSocketHandlers(
       async (data: { text: string; isVoiceInput: boolean }) => {
         const { text, isVoiceInput } = data;
 
-        if (!text || typeof text !== "string" || text.length > 1000) {
+        if (!validateInput(text)) {
           socket.emit("error", { message: "Input is invalid" });
           return;
         }
 
         chatHistory.push({ role: "user", parts: [{ text }] });
-
-        if (chatHistory.length > 20) {
-          chatHistory.splice(0, 2);
-        }
+        trimHistory(chatHistory);
 
         await orchestrator.processMessage(
           { text, isVoiceInput },
           chatHistory,
           {
-            onVoiceChunk: async (uiText, audioBuffer) => {
-              socket.emit("audio-chunk", { type: "text", content: uiText });
-              await new Promise<void>((resolve) => {
-                socket.emit("audio-chunk", {
-                  type: "audio",
-                  content: audioBuffer,
-                });
-                setTimeout(resolve, 50);
-              });
-            },
+            onVoiceChunk: (uiText, audioBuffer) =>
+              emitVoiceChunk(socket, uiText, audioBuffer),
             onTextChunk: (uiText) => {
               socket.emit("text-chunk", { content: uiText });
             },
@@ -73,7 +88,7 @@ export function registerSocketHandlers(
               socket.emit("response-complete");
             },
             onError: (error) => {
-              console.error("Error processing input:", error.message);
+              logger.error("Error processing input:", error.message);
               socket.emit("error", {
                 message: "Internal server error occurred.",
               });
