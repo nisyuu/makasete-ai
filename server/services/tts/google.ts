@@ -36,7 +36,7 @@ export class GeminiTTSService implements TTSService {
         return this.client;
     }
 
-    private static readonly VOICES: Record<string, { languageCode: string; name: string }> = {
+    private static readonly VOICES: Record<string, texttospeech_v1.Schema$VoiceSelectionParams> = {
         ja: { languageCode: 'ja-JP', name: 'ja-JP-Neural2-D' },
         en: { languageCode: 'en-US', name: 'en-US-Neural2-D' },
     };
