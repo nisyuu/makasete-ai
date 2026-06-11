@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { mapRowsToObjects, getAllSheetData, getInternalSheetData, fetchAllSheets } from './sheets';
+import { mapRowsToObjects, getAllSheetData, getInternalSheetData, fetchAllSheets, getSystemPrompt } from './sheets';
 import { google } from 'googleapis';
 import { config } from '../config';
 
@@ -112,6 +112,93 @@ describe('sheets service utilities', () => {
             // Internal check: both should be there
             expect(internalData.has('faq')).toBe(true);
             expect(internalData.has('private_knowledge')).toBe(true);
+        });
+
+        it('should skip sheets whose name starts with "wip" and capture the prompt sheet', async () => {
+            const sheets = google.sheets({ version: 'v4' });
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (sheets.spreadsheets.get as any).mockResolvedValue({
+                data: {
+                    sheets: [
+                        { properties: { title: 'faq' } },
+                        { properties: { title: 'wip_draft' } },
+                        { properties: { title: 'prompt' } },
+                        { properties: { title: null } },
+                    ],
+                },
+            });
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (sheets.spreadsheets.values.get as any).mockImplementation(({ range }: { range: string }) => {
+                if (range.startsWith('prompt')) {
+                    return Promise.resolve({ data: { values: [['You are a bot']] } });
+                }
+                return Promise.resolve({ data: { values: [['ID'], ['1']] } });
+            });
+
+            await fetchAllSheets();
+
+            const data = getAllSheetData();
+            expect(data.has('faq')).toBe(true);
+            expect(data.has('wip_draft')).toBe(false);
+            // prompt is stored separately, not as sheet data
+            expect(data.has('prompt')).toBe(false);
+            expect(getSystemPrompt()).toBe('You are a bot');
+        });
+
+        it('should treat empty sheets and an empty prompt gracefully', async () => {
+            const sheets = google.sheets({ version: 'v4' });
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (sheets.spreadsheets.get as any).mockResolvedValue({
+                data: {
+                    sheets: [
+                        { properties: { title: 'empty_sheet' } },
+                        { properties: { title: 'prompt' } },
+                    ],
+                },
+            });
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (sheets.spreadsheets.values.get as any).mockResolvedValue({ data: { values: [] } });
+
+            await fetchAllSheets();
+
+            expect(getAllSheetData().get('empty_sheet')).toEqual([]);
+            expect(getSystemPrompt()).toBe('');
+        });
+
+        it('should keep working when an individual sheet fetch fails', async () => {
+            const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+            const sheets = google.sheets({ version: 'v4' });
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (sheets.spreadsheets.get as any).mockResolvedValue({
+                data: { sheets: [{ properties: { title: 'broken' } }] },
+            });
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (sheets.spreadsheets.values.get as any).mockRejectedValue(new Error('range error'));
+
+            await expect(fetchAllSheets()).resolves.toBeUndefined();
+            errSpy.mockRestore();
+        });
+
+        it('should return early and warn when GOOGLE_SHEETS_ID is not set', async () => {
+            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+            config.googleSheetsId = undefined;
+
+            await fetchAllSheets();
+
+            expect(warnSpy).toHaveBeenCalledWith('GOOGLE_SHEETS_ID is not set.');
+            warnSpy.mockRestore();
+        });
+
+        it('should not throw when the spreadsheet metadata request fails', async () => {
+            const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+            config.googleSheetsId = 'test-id';
+            const sheets = google.sheets({ version: 'v4' });
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (sheets.spreadsheets.get as any).mockRejectedValue(new Error('auth failed'));
+
+            await expect(fetchAllSheets()).resolves.toBeUndefined();
+            expect(errSpy).toHaveBeenCalled();
+            errSpy.mockRestore();
         });
     });
 });
