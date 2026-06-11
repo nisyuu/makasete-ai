@@ -5,6 +5,7 @@ interface WidgetConfig {
   serverUrl?: string;
   title?: string;
   placeholder?: string;
+  language?: 'ja' | 'en';
 }
 
 export function initChatWidget(config: WidgetConfig = {}): void {
@@ -12,6 +13,7 @@ export function initChatWidget(config: WidgetConfig = {}): void {
     serverUrl = window.location.origin,
     title = 'Chat Assistant',
     placeholder = 'Type a message...',
+    language = 'ja',
   } = config;
 
   // Shadow DOM for style isolation
@@ -170,6 +172,7 @@ export function initChatWidget(config: WidgetConfig = {}): void {
     onRecordingEnd: () => {
       micBtn.classList.remove('recording');
     },
+    language,
   });
 
   // --- Socket ---
@@ -224,7 +227,7 @@ export function initChatWidget(config: WidgetConfig = {}): void {
       audio.resetAudioState();
     }
 
-    socket.sendUserInput(text, isVoiceInput);
+    socket.sendUserInput(text, isVoiceInput, language);
   }
 
   sendBtn.addEventListener('click', () => sendMessage(false));

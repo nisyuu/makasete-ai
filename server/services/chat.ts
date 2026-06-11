@@ -17,9 +17,9 @@ export class ChatService {
 
   async handleUserInput(
     socket: Socket,
-    data: { text: string; isVoiceInput: boolean },
+    data: { text: string; isVoiceInput: boolean; language?: string },
   ): Promise<void> {
-    const { text, isVoiceInput } = data;
+    const { text, isVoiceInput, language = "ja" } = data;
 
     if (!text || typeof text !== "string" || text.length > 1000) {
       socket.emit("error", { message: "Input is invalid" });
@@ -35,7 +35,7 @@ export class ChatService {
 
     try {
       const allData = getAllSheetData();
-      const stream = await generateResponseStream(text, allData, this.chatHistory);
+      const stream = await generateResponseStream(text, allData, this.chatHistory, language);
       const ttsService = getTTSService();
 
       let fullResponseText = "";
@@ -46,13 +46,13 @@ export class ChatService {
 
         const sentences = streamBuffer.add(chunkText);
         for (const sentence of sentences) {
-          await this.processSentence(socket, sentence, isVoiceInput, ttsService);
+          await this.processSentence(socket, sentence, isVoiceInput, ttsService, language);
         }
       }
 
       const remaining = streamBuffer.flush();
       if (remaining) {
-        await this.processSentence(socket, remaining, isVoiceInput, ttsService);
+        await this.processSentence(socket, remaining, isVoiceInput, ttsService, language);
       }
 
       this.chatHistory.push({
@@ -73,6 +73,7 @@ export class ChatService {
     sentence: string,
     isVoiceInput: boolean,
     ttsService: TTSService,
+    language = "ja",
   ): Promise<void> {
     const uiText = stripTags(sentence);
 
@@ -91,7 +92,7 @@ export class ChatService {
         if (!ttsInput.trim() || !stripTags(ttsInput).trim()) return;
 
         const audioStream: NodeJS.ReadableStream =
-          await ttsService.generateSpeechStream(ttsInput);
+          await ttsService.generateSpeechStream(ttsInput, language);
 
         const chunks: Buffer[] = [];
         audioStream.on("data", (chunk: Buffer) => {
