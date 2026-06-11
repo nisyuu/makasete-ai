@@ -1,7 +1,7 @@
 import { initChatWidget } from './widget';
 
 initChatWidget({
-  apiEndpoint: '/api/chat',
+  serverUrl: window.location.origin,
   title: 'Chat Assistant',
   placeholder: 'Type a message...',
 });

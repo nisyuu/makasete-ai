@@ -6,11 +6,12 @@ export interface SocketHandlerOptions {
   onAudioChunk: (data: { type: "text" | "audio"; content: unknown }) => void;
   onError: (message: string) => void;
   onConnect?: () => void;
+  onResponseComplete?: () => void;
 }
 
 export interface SocketHandler {
   /** ユーザーメッセージをサーバーに送信する */
-  sendUserInput: (text: string, isVoiceInput: boolean) => void;
+  sendUserInput: (text: string, isVoiceInput: boolean, language?: string) => void;
   /** Socket接続を切断する */
   disconnect: () => void;
   /** 接続中かどうか */
@@ -23,7 +24,7 @@ export interface SocketHandler {
 export function initSocketHandler(
   options: SocketHandlerOptions,
 ): SocketHandler {
-  const { serverUrl, onTextChunk, onAudioChunk, onError, onConnect } = options;
+  const { serverUrl, onTextChunk, onAudioChunk, onError, onConnect, onResponseComplete } = options;
 
   const socket: Socket = io(serverUrl);
 
@@ -46,8 +47,12 @@ export function initSocketHandler(
     onError(data.message);
   });
 
-  function sendUserInput(text: string, isVoiceInput: boolean): void {
-    socket.emit("user-input", { text, isVoiceInput });
+  socket.on("response-complete", () => {
+    onResponseComplete?.();
+  });
+
+  function sendUserInput(text: string, isVoiceInput: boolean, language = "ja"): void {
+    socket.emit("user-input", { text, isVoiceInput, language });
   }
 
   function disconnect(): void {
