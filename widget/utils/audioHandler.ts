@@ -7,6 +7,7 @@ export interface AudioHandlerOptions {
   onTranscript: (text: string) => void;
   onRecordingEnd: () => void;
   onError?: (error: Error) => void;
+  language?: string;
 }
 
 export interface AudioHandler {
@@ -30,7 +31,7 @@ export interface AudioHandler {
  * Web Audio API・TTS再生キュー・音声認識を管理するハンドラーを初期化する
  */
 export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
-  const { onTranscript, onRecordingEnd, onError } = options;
+  const { onTranscript, onRecordingEnd, onError, language = "ja" } = options;
 
   // Web Audio API
   let audioContext: AudioContext | null = null;
@@ -158,7 +159,7 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
 
     const rec = new SpeechRecognitionAPI();
     recognition = rec;
-    rec.lang = "ja-JP";
+    rec.lang = language === "en" ? "en-US" : "ja-JP";
     rec.continuous = false;
     rec.interimResults = false;
 

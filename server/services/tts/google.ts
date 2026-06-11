@@ -36,8 +36,14 @@ export class GeminiTTSService implements TTSService {
         return this.client;
     }
 
-    public async generateSpeechStream(text: string): Promise<Readable> {
+    private static readonly VOICES: Record<string, { languageCode: string; name: string }> = {
+        ja: { languageCode: 'ja-JP', name: 'ja-JP-Neural2-D' },
+        en: { languageCode: 'en-US', name: 'en-US-Neural2-D' },
+    };
+
+    public async generateSpeechStream(text: string, language = 'ja'): Promise<Readable> {
         const client = await this.getClient();
+        const voice = GeminiTTSService.VOICES[language] ?? GeminiTTSService.VOICES.ja;
 
         try {
             const isSsml = text.trim().startsWith('<speak>');
@@ -45,10 +51,10 @@ export class GeminiTTSService implements TTSService {
                 client.text.synthesize({
                     requestBody: {
                         input: isSsml ? { ssml: text } : { text },
-                        voice: { languageCode: 'ja-JP', name: 'ja-JP-Neural2-D' }, 
-                        audioConfig: { 
+                        voice,
+                        audioConfig: {
                             audioEncoding: 'MP3',
-                            speakingRate: 1.15, // Slightly faster
+                            speakingRate: 1.15,
                         },
                     }
                 }, (err, res) => {

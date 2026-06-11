@@ -128,7 +128,7 @@ io.on("connection", (socket) => {
 
   socket.on(
     "user-input",
-    (data: { text: string; isVoiceInput: boolean }) => {
+    (data: { text: string; isVoiceInput: boolean; language?: string }) => {
       chatService.handleUserInput(socket, data);
     },
   );
