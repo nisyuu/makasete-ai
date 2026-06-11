@@ -6,6 +6,7 @@ export interface SocketHandlerOptions {
   onAudioChunk: (data: { type: "text" | "audio"; content: unknown }) => void;
   onError: (message: string) => void;
   onConnect?: () => void;
+  onResponseComplete?: () => void;
 }
 
 export interface SocketHandler {
@@ -23,7 +24,7 @@ export interface SocketHandler {
 export function initSocketHandler(
   options: SocketHandlerOptions,
 ): SocketHandler {
-  const { serverUrl, onTextChunk, onAudioChunk, onError, onConnect } = options;
+  const { serverUrl, onTextChunk, onAudioChunk, onError, onConnect, onResponseComplete } = options;
 
   const socket: Socket = io(serverUrl);
 
@@ -44,6 +45,10 @@ export function initSocketHandler(
 
   socket.on("error", (data: { message: string }) => {
     onError(data.message);
+  });
+
+  socket.on("response-complete", () => {
+    onResponseComplete?.();
   });
 
   function sendUserInput(text: string, isVoiceInput: boolean): void {
