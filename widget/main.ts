@@ -1,7 +1,7 @@
-import { initChatWidget } from './widget';
+import { initChatWidget } from "./widget";
 
 initChatWidget({
-  apiEndpoint: '/api/chat',
-  title: 'Chat Assistant',
-  placeholder: 'Type a message...',
+  serverUrl: "",
+  title: "Makasete AI",
+  placeholder: "メッセージを入力...",
 });
