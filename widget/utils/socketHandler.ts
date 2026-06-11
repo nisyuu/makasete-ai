@@ -11,7 +11,7 @@ export interface SocketHandlerOptions {
 
 export interface SocketHandler {
   /** ユーザーメッセージをサーバーに送信する */
-  sendUserInput: (text: string, isVoiceInput: boolean) => void;
+  sendUserInput: (text: string, isVoiceInput: boolean, language?: string) => void;
   /** Socket接続を切断する */
   disconnect: () => void;
   /** 接続中かどうか */
@@ -58,8 +58,8 @@ export function initSocketHandler(
     onError(data.message);
   });
 
-  function sendUserInput(text: string, isVoiceInput: boolean): void {
-    socket.emit("user-input", { text, isVoiceInput });
+  function sendUserInput(text: string, isVoiceInput: boolean, language = "ja"): void {
+    socket.emit("user-input", { text, isVoiceInput, language });
   }
 
   function disconnect(): void {

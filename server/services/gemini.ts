@@ -16,33 +16,42 @@ export function initGemini() {
     model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 }
 
+const LANGUAGE_INSTRUCTIONS: Record<string, string> = {
+    ja: "以下の情報を元に、ユーザーの質問に日本語で回答してください。\n複数のカテゴリにまたがる質問には、それぞれの情報を組み合わせて回答してください。",
+    en: "Using the information below, answer the user's questions in English.\nFor questions spanning multiple categories, combine information from each relevant section.",
+};
+
 /**
  * Builds the system instruction string from sheet data.
  */
-export function buildSystemInstruction(basePrompt: string, allData: Map<string, SheetData[]>): string {
+export function buildSystemInstruction(
+    basePrompt: string,
+    allData: Map<string, SheetData[]>,
+    language = 'ja',
+): string {
     let dynamicContext = "";
-    
+
     for (const [sheetName, rows] of allData.entries()) {
         if (rows.length === 0) continue;
-        
+
         dynamicContext += `\n### ${sheetName.toUpperCase()}\n`;
-        
-        // Limit context size per sheet if needed
+
         const content = rows.slice(0, config.maxRowsPerSheet).map(row => {
             return Object.entries(row)
                 .filter(([, val]) => val !== "")
                 .map(([key, val]) => `${key}: ${val}`)
                 .join(", ");
         }).join("\n- ");
-        
+
         dynamicContext += `- ${content}\n`;
     }
+
+    const langInstruction = LANGUAGE_INSTRUCTIONS[language] ?? LANGUAGE_INSTRUCTIONS['ja'];
 
     return `
 ${basePrompt}
 
-以下の情報を元に、ユーザーの質問に回答してください。
-複数のカテゴリにまたがる質問には、それぞれの情報を組み合わせて回答してください。
+${langInstruction}
 ${dynamicContext}
 `;
 }
@@ -55,14 +64,15 @@ export async function generateResponseStream(
     prompt: string,
     allData: Map<string, SheetData[]>,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    history: any[] = []
+    history: any[] = [],
+    language = 'ja',
 ) {
     if (!model) {
         initGemini();
     }
 
     const basePrompt = getSystemPrompt() || `あなたは親切なAIアシスタントです。`;
-    const systemInstruction = buildSystemInstruction(basePrompt, allData);
+    const systemInstruction = buildSystemInstruction(basePrompt, allData, language);
 
     try {
         const chat = model.startChat({

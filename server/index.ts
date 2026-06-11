@@ -119,8 +119,13 @@ io.on("connection", (socket) => {
 
   socket.on(
     "user-input",
-    async (data: { text: string; isVoiceInput: boolean }) => {
-      await chatService.handleUserInput(socket, data.text, data.isVoiceInput);
+    async (data: { text: string; isVoiceInput: boolean; language?: string }) => {
+      await chatService.handleUserInput(
+        socket,
+        data.text,
+        data.isVoiceInput,
+        data.language ?? "ja",
+      );
     },
   );
 

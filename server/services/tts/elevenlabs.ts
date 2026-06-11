@@ -8,7 +8,9 @@ export class ElevenLabsTTSService implements TTSService {
         return "elevenlabs";
     }
 
-    public async generateSpeechStream(text: string): Promise<Readable> {
+    // ElevenLabs eleven_flash_v2_5 is multilingual; language parameter is intentionally unused
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    public async generateSpeechStream(text: string, _language?: string): Promise<Readable> {
         if (!config.elevenLabsApiKey) {
             throw new Error("ELEVENLABS_API_KEY is missing");
         }

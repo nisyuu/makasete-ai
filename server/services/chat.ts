@@ -20,6 +20,7 @@ export class ChatService {
     socket: Socket,
     text: string,
     isVoiceInput: boolean,
+    language = 'ja',
   ): Promise<void> {
     if (!text || typeof text !== "string" || text.length > 1000) {
       socket.emit("error", { message: "Input is invalid" });
@@ -39,6 +40,7 @@ export class ChatService {
         text,
         allData,
         this.chatHistory,
+        language,
       );
       const ttsService = getTTSService();
 
@@ -50,13 +52,13 @@ export class ChatService {
 
         const sentences = streamBuffer.add(chunkText);
         for (const sentence of sentences) {
-          await processSentence(socket, sentence, isVoiceInput, ttsService);
+          await processSentence(socket, sentence, isVoiceInput, ttsService, language);
         }
       }
 
       const remaining = streamBuffer.flush();
       if (remaining) {
-        await processSentence(socket, remaining, isVoiceInput, ttsService);
+        await processSentence(socket, remaining, isVoiceInput, ttsService, language);
       }
 
       this.chatHistory.push({
@@ -78,6 +80,7 @@ async function processSentence(
   sentence: string,
   isVoiceInput: boolean,
   ttsService: TTSService,
+  language = 'ja',
 ): Promise<void> {
   const uiText = stripTags(sentence);
 
@@ -96,7 +99,7 @@ async function processSentence(
       if (!ttsInput.trim() || !stripTags(ttsInput).trim()) return;
 
       const audioStream: NodeJS.ReadableStream =
-        await ttsService.generateSpeechStream(ttsInput);
+        await ttsService.generateSpeechStream(ttsInput, language);
 
       const chunks: Buffer[] = [];
       audioStream.on("data", (chunk: Buffer) => {

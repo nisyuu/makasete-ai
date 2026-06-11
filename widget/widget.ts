@@ -16,6 +16,8 @@ export interface WidgetConfig {
   title?: string;
   placeholder?: string;
   primaryColor?: string;
+  /** 応答言語コード。'ja'（日本語、デフォルト）または 'en'（英語）など */
+  language?: string;
 }
 
 const WIDGET_HTML = `
@@ -251,6 +253,7 @@ export function initChatWidget(config: WidgetConfig = {}): void {
     title = "Chat Assistant",
     placeholder = "Type a message...",
     primaryColor,
+    language = "ja",
   } = config;
 
   // Shadow DOM host
@@ -315,6 +318,7 @@ export function initChatWidget(config: WidgetConfig = {}): void {
     onError: (err) => {
       console.error("[MakaseteAI] Speech recognition error:", err);
     },
+    language,
   });
 
   // Socket handler — text-chunk events display incrementally (streaming)
@@ -372,7 +376,7 @@ export function initChatWidget(config: WidgetConfig = {}): void {
     messageState.currentMakaseteServerMessageRaw = "";
     showTypingIndicator(timeline);
 
-    socketHandler.sendUserInput(text, voiceInput);
+    socketHandler.sendUserInput(text, voiceInput, language);
   }
 
   // Drag support (desktop)
