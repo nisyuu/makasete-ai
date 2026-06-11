@@ -10,16 +10,7 @@ import {
   getAllSheetData,
   dataReadyPromise,
 } from "./services/sheets";
-import { generateResponseStream } from "./services/gemini";
-import { getTTSService } from "./services/tts/factory";
-import { TTSService } from "./services/tts/types";
-import { StreamBuffer } from "./utils/streamBuffer";
-import {
-  stripTags,
-  cleanupForTTS,
-  hasTags,
-  removeMarkdownLinks,
-} from "./utils/text";
+import { ChatService } from "./services/chat";
 
 const app = express();
 
@@ -33,7 +24,6 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
     : process.env.ALLOWED_ORIGINS
   : "*";
 
-// 1. CORS Middleware (Must be FIRST)
 app.use(
   cors({
     origin: allowedOrigins,
@@ -43,9 +33,8 @@ app.use(
   }),
 );
 
-// Security: Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
+  windowMs: 15 * 60 * 1000,
   limit: 100,
   standardHeaders: "draft-7",
   legacyHeaders: false,
@@ -86,13 +75,9 @@ io.use((socket, next) => {
   next();
 });
 
-// Middleware
 app.use(express.json());
-
-// Static files (Widget)
 app.use("/public", express.static(path.join(process.cwd(), "dist/public")));
 
-// Demo Page
 app.get("/demo", (req: Request, res: Response) => {
   res.sendFile(path.join(process.cwd(), "dist/public/demo.html"));
 });
@@ -102,7 +87,6 @@ app.get("/health", async (req: Request, res: Response) => {
   res.json({ status: "ready" });
 });
 
-// API Endpoints
 app.get("/api/:sheetName", async (req: Request, res: Response) => {
   await dataReadyPromise;
   const { sheetName } = req.params;
@@ -126,75 +110,17 @@ app.get("/api/:sheetName", async (req: Request, res: Response) => {
   }
 });
 
-// Initialize caching
 fetchAllSheets().then(() => {
   console.log("Initial data fetch (all sheets) complete.");
 });
 
-// WebSocket logic
 io.on("connection", (socket) => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const chatHistory: any[] = [];
+  const chatService = new ChatService();
 
   socket.on(
     "user-input",
     async (data: { text: string; isVoiceInput: boolean }) => {
-      const { text, isVoiceInput } = data;
-
-      if (!text || typeof text !== "string" || text.length > 1000) {
-        socket.emit("error", { message: "Input is invalid" });
-        return;
-      }
-
-      chatHistory.push({ role: "user", parts: [{ text }] });
-
-      if (chatHistory.length > 20) {
-        chatHistory.splice(0, 2);
-      }
-
-      const streamBuffer = new StreamBuffer();
-
-      try {
-        // 1. Fetch sheet data in the orchestration layer and inject into Gemini service
-        const allData = getAllSheetData();
-
-        // 2. Get Gemini Stream, passing sheet data via dependency injection
-        const stream = await generateResponseStream(text, allData, chatHistory);
-        const ttsService = getTTSService();
-
-        let fullResponseText = "";
-
-        for await (const chunk of stream) {
-          const chunkText = chunk.text();
-          fullResponseText += chunkText;
-
-          // Buffer and split by sentences
-          const sentences = streamBuffer.add(chunkText);
-
-          for (const sentence of sentences) {
-            await processSentence(socket, sentence, isVoiceInput, ttsService);
-          }
-        }
-
-        // Flush remaining buffer
-        const remaining = streamBuffer.flush();
-        if (remaining) {
-          await processSentence(socket, remaining, isVoiceInput, ttsService);
-        }
-
-        // Add model response to history
-        chatHistory.push({
-          role: "model",
-          parts: [{ text: fullResponseText }],
-        });
-
-        // Signal end of turn
-        socket.emit("response-complete");
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error("Error processing input:", message);
-        socket.emit("error", { message: "Internal server error occurred." });
-      }
+      await chatService.handleUserInput(socket, data.text, data.isVoiceInput);
     },
   );
 
@@ -209,63 +135,6 @@ io.on("connection", (socket) => {
   });
 });
 
-async function processSentence(
-  socket: Socket,
-  sentence: string,
-  isVoiceInput: boolean,
-  ttsService: TTSService,
-) {
-  // 1. Prepare text for UI by removing SSML tags
-  const uiText = stripTags(sentence);
-
-  if (isVoiceInput) {
-    // Send clean text to UI
-    socket.emit("audio-chunk", { type: "text", content: uiText });
-
-    try {
-      // 2. Prepare text for TTS
-      let ttsInput: string;
-      if (hasTags(sentence)) {
-        // Ensure it's a valid SSML document and clean it up
-        const innerText = sentence.replace(/<\/?speak>/g, "").trim();
-        ttsInput = `<speak>${removeMarkdownLinks(innerText)}</speak>`;
-      } else {
-        // Plain text handling
-        ttsInput = cleanupForTTS(sentence);
-      }
-
-      // Skip if no actual text to read
-      if (!ttsInput.trim() || !stripTags(ttsInput).trim()) return;
-
-      const audioStream: NodeJS.ReadableStream =
-        await ttsService.generateSpeechStream(ttsInput);
-
-      const chunks: Buffer[] = [];
-      audioStream.on("data", (chunk: Buffer) => {
-        chunks.push(chunk);
-      });
-
-      await new Promise((resolve, reject) => {
-        audioStream.on("end", () => {
-          const fullBuffer = Buffer.concat(chunks);
-          socket.emit("audio-chunk", { type: "audio", content: fullBuffer });
-          setTimeout(resolve, 50); // Minimal gap
-        });
-        audioStream.on("error", (err) => {
-          console.error("[TTS] Stream error:", err);
-          reject(err);
-        });
-      });
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : String(e);
-      console.error("TTS Error:", message);
-    }
-  } else {
-    socket.emit("text-chunk", { content: uiText });
-  }
-}
-
-// Start Server
 const PORT = config.port;
 httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
