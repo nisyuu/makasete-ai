@@ -1,271 +1,257 @@
-import { initSocketHandler, SocketHandler } from './utils/socketHandler';
-import { initAudioHandler, AudioHandler } from './utils/audioHandler';
+import widgetStyles from "./styles.css?inline";
+import { initSocketHandler, SocketHandler } from "./utils/socketHandler";
+import { initAudioHandler, AudioHandler } from "./utils/audioHandler";
+import { initDragHandler } from "./utils/dragHandler";
+import {
+  getUIElements,
+  updateInputActions,
+  showTypingIndicator,
+  appendMessage,
+  hideLoadingOverlay,
+  MessageState,
+} from "./utils/uiRenderer";
 
 interface WidgetConfig {
   serverUrl?: string;
   title?: string;
   placeholder?: string;
-  language?: 'ja' | 'en';
+  language?: "ja" | "en";
+}
+
+/** ウィジェットのリッチUIマークアップ（ランチャーボタン・チャットウィンドウ等） */
+function buildWidgetMarkup(placeholder: string, helperText: string): string {
+  return `
+    <div class="widget-container">
+      <div class="chat-window">
+        <div class="chat-header">
+          <span class="chat-title"></span>
+          <div class="header-controls">
+            <button class="close-btn" title="閉じる">
+              <svg class="lucide lucide-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="chat-timeline"></div>
+        <div class="input-area">
+          <div class="input-wrapper">
+            <textarea class="text-input" placeholder="${placeholder}" rows="1"></textarea>
+            <div class="input-helper">${helperText}</div>
+          </div>
+          <div class="input-actions">
+            <button class="btn mic-btn" title="音声入力">
+              <svg class="lucide lucide-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+            </button>
+            <button class="btn send-btn" title="送信" style="display: none;">
+              <svg class="lucide lucide-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="widget-footer">Powered by Makasete AI</div>
+        <div class="loading-overlay">
+          <div class="spinner"></div>
+          <div class="loading-text">準備中です。少々お待ちください...</div>
+        </div>
+      </div>
+      <button class="launcher-button" title="AIアシスタントに相談する">
+        <svg class="launcher-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 8V4H8"></path>
+          <rect width="16" height="12" x="4" y="8" rx="2"></rect>
+          <path d="M2 14h2"></path>
+          <path d="M20 14h2"></path>
+          <path d="M15 13v2"></path>
+          <path d="M9 13v2"></path>
+        </svg>
+      </button>
+    `;
 }
 
 export function initChatWidget(config: WidgetConfig = {}): void {
   const {
     serverUrl = window.location.origin,
-    title = 'Chat Assistant',
-    placeholder = 'Type a message...',
-    language = 'ja',
+    title = "AIアシスタント",
+    placeholder = "質問を入力...",
+    language = "ja",
   } = config;
 
-  // Shadow DOM for style isolation
-  const host = document.createElement('div');
-  host.id = 'makasete-ai-widget-host';
-  document.body.appendChild(host);
-  const shadow = host.attachShadow({ mode: 'open' });
+  const isEn = language === "en";
+  const helperText = isEn ? "Cmd(Ctrl) + Enter to send" : "Command(Ctrl) + Enterで送信";
+  const greeting = isEn
+    ? "Hi, I'm your AI assistant. How can I help you?"
+    : "AIアシスタントです。何かお手伝いできることはありますか？";
 
-  // Styles
-  const style = document.createElement('style');
-  style.textContent = `
-    :host { all: initial; }
-    .container {
-      position: fixed;
-      bottom: 20px;
-      right: 20px;
-      width: 350px;
-      height: 500px;
-      display: flex;
-      flex-direction: column;
-      border: 1px solid #ccc;
-      border-radius: 8px;
-      overflow: hidden;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-      font-family: sans-serif;
-      background: white;
-      z-index: 2147483647;
-    }
-    .header {
-      background: #4f46e5;
-      color: white;
-      padding: 12px 16px;
-      font-weight: bold;
-      font-size: 16px;
-      cursor: move;
-      user-select: none;
-    }
-    .messages {
-      flex: 1;
-      overflow-y: auto;
-      padding: 12px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      background: #f9fafb;
-    }
-    .msg {
-      max-width: 80%;
-      padding: 8px 12px;
-      border-radius: 8px;
-      font-size: 14px;
-      line-height: 1.4;
-      word-wrap: break-word;
-      white-space: pre-wrap;
-    }
-    .msg.user {
-      align-self: flex-end;
-      background: #4f46e5;
-      color: white;
-      margin-left: auto;
-    }
-    .msg.assistant {
-      align-self: flex-start;
-      background: white;
-      color: #111827;
-      border: 1px solid #e5e7eb;
-    }
-    .input-area {
-      display: flex;
-      padding: 8px;
-      border-top: 1px solid #e5e7eb;
-      background: white;
-      gap: 8px;
-    }
-    input[type="text"] {
-      flex: 1;
-      padding: 8px 12px;
-      border: 1px solid #d1d5db;
-      border-radius: 4px;
-      font-size: 14px;
-      outline: none;
-    }
-    input[type="text"]:disabled { background: #f3f4f6; }
-    button {
-      padding: 8px 16px;
-      background: #4f46e5;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 14px;
-    }
-    button:disabled { background: #a5b4fc; cursor: not-allowed; }
-    button.mic { background: #10b981; }
-    button.mic.recording { background: #ef4444; }
-  `;
+  // Shadow DOM for style isolation
+  const host = document.createElement("div");
+  host.id = "makasete-ai-widget-host";
+  document.body.appendChild(host);
+  const shadow = host.attachShadow({ mode: "open" });
+
+  const style = document.createElement("style");
+  style.textContent = widgetStyles;
   shadow.appendChild(style);
 
-  // Container
-  const container = document.createElement('div');
-  container.className = 'container';
-
-  const header = document.createElement('div');
-  header.className = 'header';
-  header.textContent = title;
-
-  const messagesArea = document.createElement('div');
-  messagesArea.className = 'messages';
-
-  const inputArea = document.createElement('div');
-  inputArea.className = 'input-area';
-
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.placeholder = placeholder;
-
-  const sendBtn = document.createElement('button');
-  sendBtn.textContent = 'Send';
-
-  const micBtn = document.createElement('button');
-  micBtn.className = 'mic';
-  micBtn.textContent = '🎤';
-
-  inputArea.appendChild(input);
-  inputArea.appendChild(micBtn);
-  inputArea.appendChild(sendBtn);
-  container.appendChild(header);
-  container.appendChild(messagesArea);
-  container.appendChild(inputArea);
-  shadow.appendChild(container);
-
-  // --- Helpers ---
-
-  function addMessage(role: 'user' | 'assistant', text: string): HTMLDivElement {
-    const div = document.createElement('div');
-    div.className = `msg ${role}`;
-    div.textContent = text;
-    messagesArea.appendChild(div);
-    messagesArea.scrollTop = messagesArea.scrollHeight;
-    return div;
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = buildWidgetMarkup(placeholder, helperText);
+  // innerHTML を直接 shadow に展開する（widget-container を維持）
+  while (wrapper.firstChild) {
+    shadow.appendChild(wrapper.firstChild);
   }
 
-  function setInputLocked(locked: boolean): void {
-    input.disabled = locked;
-    sendBtn.disabled = locked;
-  }
+  const els = getUIElements(shadow);
+  els.chatTitle.textContent = title;
 
-  let currentAssistantDiv: HTMLDivElement | null = null;
+  const messageState: MessageState = { currentMakaseteServerMessageRaw: "" };
+
+  // ボットの音声出力が有効かどうか（マイク利用時に自動で有効化される）
+  let isAudioEnabled = false;
+  // ドラッグ操作中かどうか（ランチャーのクリック判定で使用）
+  let isDragging = false;
 
   // --- Audio ---
   const audio: AudioHandler = initAudioHandler({
     onTranscript: (text) => {
-      input.value = text;
+      els.input.value = text;
       sendMessage(true);
     },
     onRecordingEnd: () => {
-      micBtn.classList.remove('recording');
+      els.micBtn.classList.remove("recording");
     },
     language,
   });
+
+  // 音声認識が使えない環境ではマイクボタンを隠し、送信ボタンを常時表示する
+  if (!audio.isSpeechRecognitionSupported()) {
+    els.micBtn.style.display = "none";
+    els.sendBtn.style.display = "flex";
+  }
 
   // --- Socket ---
   const socket: SocketHandler = initSocketHandler({
     serverUrl,
     onTextChunk: (content) => {
-      if (!currentAssistantDiv) {
-        currentAssistantDiv = addMessage('assistant', '');
-      }
-      currentAssistantDiv.textContent += content;
-      messagesArea.scrollTop = messagesArea.scrollHeight;
+      appendMessage(els.timeline, messageState, "makasete-server", content, true);
     },
     onAudioChunk: (data) => {
-      if (data.type === 'text') {
-        if (!currentAssistantDiv) {
-          currentAssistantDiv = addMessage('assistant', '');
-        }
-        currentAssistantDiv.textContent += (data.content as string);
-        messagesArea.scrollTop = messagesArea.scrollHeight;
-      } else if (data.type === 'audio') {
+      if (data.type === "text") {
+        appendMessage(
+          els.timeline,
+          messageState,
+          "makasete-server",
+          data.content as string,
+          true,
+        );
+      } else if (data.type === "audio") {
         audio.handleAudioChunk(data.content);
       }
     },
     onError: (message) => {
-      addMessage('assistant', `Error: ${message}`);
-      setInputLocked(false);
-      currentAssistantDiv = null;
+      const prefix = isEn ? "An error occurred: " : "エラーが発生しました: ";
+      appendMessage(
+        els.timeline,
+        messageState,
+        "makasete-server",
+        `${prefix}${message}`,
+      );
     },
     onResponseComplete: () => {
-      setInputLocked(false);
-      currentAssistantDiv = null;
-      input.focus();
+      els.input.focus();
     },
     onConnect: () => {
-      console.log('[MakaseteAI] Connected');
+      console.log("[MakaseteAI] Connected");
     },
   });
 
   // --- Send ---
   function sendMessage(isVoiceInput = false): void {
-    const text = input.value.trim();
+    const text = els.input.value.trim();
     if (!text) return;
 
-    input.value = '';
-    setInputLocked(true);
-    currentAssistantDiv = null;
+    const useAudio = isVoiceInput || isAudioEnabled;
 
-    addMessage('user', text);
+    appendMessage(els.timeline, messageState, "user", text);
+    els.input.value = "";
+    updateInputActions(els.input, els.sendBtn, els.micBtn);
+    showTypingIndicator(els.timeline);
 
-    if (isVoiceInput) {
-      audio.resumeAudioContext();
+    if (useAudio) {
       audio.resetAudioState();
+      audio.resumeAudioContext().catch(console.error);
     }
 
-    socket.sendUserInput(text, isVoiceInput, language);
+    socket.sendUserInput(text, useAudio, language);
   }
 
-  sendBtn.addEventListener('click', () => sendMessage(false));
-  input.addEventListener('keydown', (e: KeyboardEvent) => {
-    if (e.key === 'Enter') sendMessage(false);
+  // --- Events ---
+  els.sendBtn.addEventListener("click", () => {
+    audio.resumeAudioContext().catch(console.error);
+    sendMessage();
   });
 
-  micBtn.addEventListener('click', () => {
+  els.input.addEventListener("keydown", (e: KeyboardEvent) => {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      audio.resumeAudioContext().catch(console.error);
+      sendMessage();
+    }
+  });
+
+  els.input.addEventListener("input", () => {
+    updateInputActions(els.input, els.sendBtn, els.micBtn);
+  });
+
+  els.micBtn.addEventListener("click", () => {
     if (!audio.isSpeechRecognitionSupported()) {
-      alert('音声認識はこのブラウザでは利用できません');
+      alert(isEn ? "Speech recognition is not available in this browser." : "音声認識はこのブラウザでは利用できません");
       return;
     }
+    audio.resumeAudioContext().catch(console.error);
     audio.initAudioContext();
     audio.toggleRecording();
-    micBtn.classList.toggle('recording');
+    const recording = els.micBtn.classList.toggle("recording");
+    // マイク利用開始時にボットの音声出力も自動で有効化する
+    if (recording) isAudioEnabled = true;
   });
+
+  els.launcherBtn.addEventListener("click", () => {
+    if (isDragging) return; // ドラッグ中はトグルしない
+    const isOpen = els.chatWindow.classList.toggle("open");
+
+    // モバイルでは開いている間 body のスクロールを止める
+    if (window.innerWidth <= 600) {
+      document.body.style.overflow = isOpen ? "hidden" : "";
+    }
+
+    if (isOpen) {
+      audio.resumeAudioContext().catch(console.error);
+    } else {
+      audio.resetAudioState();
+    }
+  });
+
+  if (els.closeBtn) {
+    els.closeBtn.addEventListener("click", () => {
+      els.chatWindow.classList.remove("open");
+      document.body.style.overflow = "";
+      audio.resetAudioState();
+    });
+  }
 
   // --- Drag ---
-  let isDragging = false;
-  let dragOffsetX = 0;
-  let dragOffsetY = 0;
-
-  header.addEventListener('mousedown', (e: MouseEvent) => {
-    isDragging = true;
-    const rect = container.getBoundingClientRect();
-    dragOffsetX = e.clientX - rect.left;
-    dragOffsetY = e.clientY - rect.top;
+  const header = shadow.querySelector(".chat-header") as HTMLElement;
+  initDragHandler(els.container, [els.launcherBtn, header], els.launcherBtn, (dragging) => {
+    isDragging = dragging;
   });
 
-  document.addEventListener('mousemove', (e: MouseEvent) => {
-    if (!isDragging) return;
-    container.style.right = 'auto';
-    container.style.bottom = 'auto';
-    container.style.left = `${e.clientX - dragOffsetX}px`;
-    container.style.top = `${e.clientY - dragOffsetY}px`;
-  });
+  // --- データ準備の完了を待ってローディングを解除 ---
+  fetch(`${serverUrl}/health`)
+    .then((response) => {
+      if (response.ok) {
+        hideLoadingOverlay(els.loadingOverlay);
+      }
+    })
+    .catch((e) => {
+      console.error("[MakaseteAI] Error waiting for data:", e);
+    });
 
-  document.addEventListener('mouseup', () => {
-    isDragging = false;
-  });
+  // 初回の挨拶メッセージ
+  appendMessage(els.timeline, messageState, "makasete-server", greeting);
 }
