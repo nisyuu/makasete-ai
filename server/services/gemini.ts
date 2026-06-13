@@ -1,6 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { config } from "../config";
-import { getInternalSheetData, getSystemPrompt, SheetData } from "./sheets";
+import { getSystemPrompt, SheetData } from "./sheets";
 
 let genAI: GoogleGenerativeAI;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -47,20 +47,34 @@ ${dynamicContext}
 `;
 }
 
+const LANGUAGE_PROMPTS: Record<string, string> = {
+    en: "Please respond in English.",
+    ja: "日本語で回答してください。",
+};
+
+const LANGUAGE_ACK: Record<string, string> = {
+    en: "Understood. I have reviewed the provided information and am ready to assist.",
+    ja: "承知いたしました。提供された情報を把握しました。接客を開始します。",
+};
+
 /**
  * Generates a text response stream from Gemini.
+ * Accepts sheet data via dependency injection instead of fetching it internally.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function generateResponseStream(prompt: string, history: any[] = []) {
+export async function generateResponseStream(
+    prompt: string,
+    allData: Map<string, SheetData[]>,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    history: any[] = [],
+    language = "ja"
+) {
     if (!model) {
         initGemini();
     }
 
-    // Get all data from sheets
     const basePrompt = getSystemPrompt() || `あなたは親切なAIアシスタントです。`;
-    const allData = getInternalSheetData();
-
-    const systemInstruction = buildSystemInstruction(basePrompt, allData);
+    const langInstruction = LANGUAGE_PROMPTS[language] ?? LANGUAGE_PROMPTS.ja;
+    const systemInstruction = buildSystemInstruction(basePrompt, allData) + `\n${langInstruction}`;
 
     try {
         const chat = model.startChat({
@@ -71,7 +85,7 @@ export async function generateResponseStream(prompt: string, history: any[] = []
                 },
                 {
                     role: "model",
-                    parts: [{ text: "承知いたしました。提供された情報を把握しました。接客を開始します。" }]
+                    parts: [{ text: LANGUAGE_ACK[language] ?? LANGUAGE_ACK.ja }]
                 },
                 ...history
             ]

@@ -8,7 +8,7 @@ export class ElevenLabsTTSService implements TTSService {
         return "elevenlabs";
     }
 
-    public async generateSpeechStream(text: string): Promise<Readable> {
+    public async generateSpeechStream(text: string, _language = 'ja'): Promise<Readable> {
         if (!config.elevenLabsApiKey) {
             throw new Error("ELEVENLABS_API_KEY is missing");
         }

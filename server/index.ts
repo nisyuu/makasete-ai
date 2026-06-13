@@ -10,16 +10,7 @@ import {
   getAllSheetData,
   dataReadyPromise,
 } from "./services/sheets";
-import { generateResponseStream } from "./services/gemini";
-import { getTTSService } from "./services/tts/factory";
-import { TTSService } from "./services/tts/types";
-import { StreamBuffer } from "./utils/streamBuffer";
-import {
-  stripTags,
-  cleanupForTTS,
-  hasTags,
-  removeMarkdownLinks,
-} from "./utils/text";
+import { ChatService } from "./services/chat";
 
 const app = express();
 
@@ -133,65 +124,12 @@ fetchAllSheets().then(() => {
 
 // WebSocket logic
 io.on("connection", (socket) => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const chatHistory: any[] = [];
+  const chatService = new ChatService();
 
   socket.on(
     "user-input",
-    async (data: { text: string; isVoiceInput: boolean }) => {
-      const { text, isVoiceInput } = data;
-
-      if (!text || typeof text !== "string" || text.length > 1000) {
-        socket.emit("error", { message: "Input is invalid" });
-        return;
-      }
-
-      chatHistory.push({ role: "user", parts: [{ text }] });
-
-      if (chatHistory.length > 20) {
-        chatHistory.splice(0, 2);
-      }
-
-      const streamBuffer = new StreamBuffer();
-
-      try {
-        // 1. Get Gemini Stream
-        const stream = await generateResponseStream(text, chatHistory);
-        const ttsService = getTTSService();
-
-        let fullResponseText = "";
-
-        for await (const chunk of stream) {
-          const chunkText = chunk.text();
-          fullResponseText += chunkText;
-
-          // Buffer and split by sentences
-          const sentences = streamBuffer.add(chunkText);
-
-          for (const sentence of sentences) {
-            await processSentence(socket, sentence, isVoiceInput, ttsService);
-          }
-        }
-
-        // Flush remaining buffer
-        const remaining = streamBuffer.flush();
-        if (remaining) {
-          await processSentence(socket, remaining, isVoiceInput, ttsService);
-        }
-
-        // Add model response to history
-        chatHistory.push({
-          role: "model",
-          parts: [{ text: fullResponseText }],
-        });
-
-        // Signal end of turn
-        socket.emit("response-complete");
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error("Error processing input:", message);
-        socket.emit("error", { message: "Internal server error occurred." });
-      }
+    (data: { text: string; isVoiceInput: boolean; language?: string }) => {
+      chatService.handleUserInput(socket, data);
     },
   );
 
@@ -205,62 +143,6 @@ io.on("connection", (socket) => {
     }
   });
 });
-
-async function processSentence(
-  socket: Socket,
-  sentence: string,
-  isVoiceInput: boolean,
-  ttsService: TTSService,
-) {
-  // 1. Prepare text for UI by removing SSML tags
-  const uiText = stripTags(sentence);
-
-  if (isVoiceInput) {
-    // Send clean text to UI
-    socket.emit("audio-chunk", { type: "text", content: uiText });
-
-    try {
-      // 2. Prepare text for TTS
-      let ttsInput: string;
-      if (hasTags(sentence)) {
-        // Ensure it's a valid SSML document and clean it up
-        const innerText = sentence.replace(/<\/?speak>/g, "").trim();
-        ttsInput = `<speak>${removeMarkdownLinks(innerText)}</speak>`;
-      } else {
-        // Plain text handling
-        ttsInput = cleanupForTTS(sentence);
-      }
-
-      // Skip if no actual text to read
-      if (!ttsInput.trim() || !stripTags(ttsInput).trim()) return;
-
-      const audioStream: NodeJS.ReadableStream =
-        await ttsService.generateSpeechStream(ttsInput);
-
-      const chunks: Buffer[] = [];
-      audioStream.on("data", (chunk: Buffer) => {
-        chunks.push(chunk);
-      });
-
-      await new Promise((resolve, reject) => {
-        audioStream.on("end", () => {
-          const fullBuffer = Buffer.concat(chunks);
-          socket.emit("audio-chunk", { type: "audio", content: fullBuffer });
-          setTimeout(resolve, 50); // Minimal gap
-        });
-        audioStream.on("error", (err) => {
-          console.error("[TTS] Stream error:", err);
-          reject(err);
-        });
-      });
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : String(e);
-      console.error("TTS Error:", message);
-    }
-  } else {
-    socket.emit("text-chunk", { content: uiText });
-  }
-}
 
 // Start Server
 const PORT = config.port;

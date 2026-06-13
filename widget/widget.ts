@@ -1,505 +1,271 @@
-import { io, Socket } from "socket.io-client";
-import { normalizeSettingKey, formatMessageText } from "./utils/text";
+import { initSocketHandler, SocketHandler } from './utils/socketHandler';
+import { initAudioHandler, AudioHandler } from './utils/audioHandler';
 
-interface BufferData {
-  type: "Buffer";
-  data: number[];
+interface WidgetConfig {
+  serverUrl?: string;
+  title?: string;
+  placeholder?: string;
+  language?: 'ja' | 'en';
 }
 
-export class ChatWidget {
-  private shadowRoot: ShadowRoot;
-  private socket: Socket;
-  private audioQueue: ArrayBuffer[] = [];
-  private isPlaying = false;
+export function initChatWidget(config: WidgetConfig = {}): void {
+  const {
+    serverUrl = window.location.origin,
+    title = 'Chat Assistant',
+    placeholder = 'Type a message...',
+    language = 'ja',
+  } = config;
 
-  // Web Audio API
-  private audioContext: AudioContext | null = null;
-  private currentSource: AudioBufferSourceNode | null = null;
-  private gainNode: GainNode | null = null;
+  // Shadow DOM for style isolation
+  const host = document.createElement('div');
+  host.id = 'makasete-ai-widget-host';
+  document.body.appendChild(host);
+  const shadow = host.attachShadow({ mode: 'open' });
 
-  // UI Elements
-  private container: HTMLElement;
-  private chatWindow: HTMLElement;
-  private chatTitle: HTMLElement;
-  private timeline: HTMLElement;
-  private input: HTMLTextAreaElement;
-  private sendBtn: HTMLButtonElement;
-  private micBtn: HTMLButtonElement;
-  private launcherBtn: HTMLButtonElement;
-  private loadingOverlay: HTMLElement;
+  // Styles
+  const style = document.createElement('style');
+  style.textContent = `
+    :host { all: initial; }
+    .container {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      width: 350px;
+      height: 500px;
+      display: flex;
+      flex-direction: column;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      font-family: sans-serif;
+      background: white;
+      z-index: 2147483647;
+    }
+    .header {
+      background: #4f46e5;
+      color: white;
+      padding: 12px 16px;
+      font-weight: bold;
+      font-size: 16px;
+      cursor: move;
+      user-select: none;
+    }
+    .messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      background: #f9fafb;
+    }
+    .msg {
+      max-width: 80%;
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 14px;
+      line-height: 1.4;
+      word-wrap: break-word;
+      white-space: pre-wrap;
+    }
+    .msg.user {
+      align-self: flex-end;
+      background: #4f46e5;
+      color: white;
+      margin-left: auto;
+    }
+    .msg.assistant {
+      align-self: flex-start;
+      background: white;
+      color: #111827;
+      border: 1px solid #e5e7eb;
+    }
+    .input-area {
+      display: flex;
+      padding: 8px;
+      border-top: 1px solid #e5e7eb;
+      background: white;
+      gap: 8px;
+    }
+    input[type="text"] {
+      flex: 1;
+      padding: 8px 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 4px;
+      font-size: 14px;
+      outline: none;
+    }
+    input[type="text"]:disabled { background: #f3f4f6; }
+    button {
+      padding: 8px 16px;
+      background: #4f46e5;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    button:disabled { background: #a5b4fc; cursor: not-allowed; }
+    button.mic { background: #10b981; }
+    button.mic.recording { background: #ef4444; }
+  `;
+  shadow.appendChild(style);
 
-  // State
-  private isRecording = false;
-  private isAudioEnabled = false;
-  private recognition: SpeechRecognition | null = null;
-  private serverUrl: string;
+  // Container
+  const container = document.createElement('div');
+  container.className = 'container';
 
-  // Dragging state
-  private isDragging = false;
-  private dragStartX = 0;
-  private dragStartY = 0;
-  private containerPosX = 0;
-  private containerPosY = 0;
+  const header = document.createElement('div');
+  header.className = 'header';
+  header.textContent = title;
 
-  constructor(shadowRoot: ShadowRoot, serverUrl: string) {
-    this.shadowRoot = shadowRoot;
-    this.serverUrl = serverUrl;
-    this.socket = io(serverUrl);
+  const messagesArea = document.createElement('div');
+  messagesArea.className = 'messages';
 
-    // Element binding
-    this.container = this.shadowRoot.querySelector(
-      ".widget-container",
-    ) as HTMLElement;
-    this.chatWindow = this.shadowRoot.querySelector(
-      ".chat-window",
-    ) as HTMLElement;
-    this.chatTitle = this.shadowRoot.querySelector(
-      ".chat-title",
-    ) as HTMLElement;
-    this.timeline = this.shadowRoot.querySelector(
-      ".chat-timeline",
-    ) as HTMLElement;
-    this.input = this.shadowRoot.querySelector(
-      ".text-input",
-    ) as HTMLTextAreaElement;
-    this.sendBtn = this.shadowRoot.querySelector(
-      ".send-btn",
-    ) as HTMLButtonElement;
-    this.micBtn = this.shadowRoot.querySelector(
-      ".mic-btn",
-    ) as HTMLButtonElement;
-    this.launcherBtn = this.shadowRoot.querySelector(
-      ".launcher-button",
-    ) as HTMLButtonElement;
-    this.loadingOverlay = this.shadowRoot.querySelector(
-      ".loading-overlay",
-    ) as HTMLElement;
+  const inputArea = document.createElement('div');
+  inputArea.className = 'input-area';
 
-    this.initSocket();
-    this.bindEvents();
-    this.initSpeechRecognition();
-    this.initDragging();
-    this.waitForData();
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.placeholder = placeholder;
+
+  const sendBtn = document.createElement('button');
+  sendBtn.textContent = 'Send';
+
+  const micBtn = document.createElement('button');
+  micBtn.className = 'mic';
+  micBtn.textContent = '🎤';
+
+  inputArea.appendChild(input);
+  inputArea.appendChild(micBtn);
+  inputArea.appendChild(sendBtn);
+  container.appendChild(header);
+  container.appendChild(messagesArea);
+  container.appendChild(inputArea);
+  shadow.appendChild(container);
+
+  // --- Helpers ---
+
+  function addMessage(role: 'user' | 'assistant', text: string): HTMLDivElement {
+    const div = document.createElement('div');
+    div.className = `msg ${role}`;
+    div.textContent = text;
+    messagesArea.appendChild(div);
+    messagesArea.scrollTop = messagesArea.scrollHeight;
+    return div;
   }
 
-  private initDragging() {
-    const header = this.shadowRoot.querySelector(".chat-header") as HTMLElement;
-    const handles = [this.launcherBtn, header];
+  function setInputLocked(locked: boolean): void {
+    input.disabled = locked;
+    sendBtn.disabled = locked;
+  }
 
-    const onMouseDown = (e: MouseEvent | TouchEvent) => {
-      // Disable dragging on small screens (mobile)
-      if (window.innerWidth <= 600) return;
+  let currentAssistantDiv: HTMLDivElement | null = null;
 
-      // Don't drag if clicking buttons inside header/launcher
-      const target = e.target as HTMLElement;
-      if (
-        target.closest("button") &&
-        target.closest("button") !== this.launcherBtn
-      )
-        return;
+  // --- Audio ---
+  const audio: AudioHandler = initAudioHandler({
+    onTranscript: (text) => {
+      input.value = text;
+      sendMessage(true);
+    },
+    onRecordingEnd: () => {
+      micBtn.classList.remove('recording');
+    },
+    language,
+  });
 
-      this.isDragging = false; // Reset on start
-      const clientX = e instanceof MouseEvent ? e.clientX : e.touches[0].clientX;
-      const clientY = e instanceof MouseEvent ? e.clientY : e.touches[0].clientY;
-
-      this.dragStartX = clientX;
-      this.dragStartY = clientY;
-
-      const rect = this.container.getBoundingClientRect();
-      this.containerPosX = rect.left;
-      this.containerPosY = rect.top;
-
-      const onMouseMove = (moveEv: MouseEvent | TouchEvent) => {
-        const moveX =
-          moveEv instanceof MouseEvent ? moveEv.clientX : moveEv.touches[0].clientX;
-        const moveY =
-          moveEv instanceof MouseEvent ? moveEv.clientY : moveEv.touches[0].clientY;
-
-        const deltaX = moveX - this.dragStartX;
-        const deltaY = moveY - this.dragStartY;
-
-        if (!this.isDragging && (Math.abs(deltaX) > 5 || Math.abs(deltaY) > 5)) {
-          this.isDragging = true;
-          // When drag starts, switch to top/left and remove bottom/right constraints
-          this.container.style.bottom = "auto";
-          this.container.style.right = "auto";
+  // --- Socket ---
+  const socket: SocketHandler = initSocketHandler({
+    serverUrl,
+    onTextChunk: (content) => {
+      if (!currentAssistantDiv) {
+        currentAssistantDiv = addMessage('assistant', '');
+      }
+      currentAssistantDiv.textContent += content;
+      messagesArea.scrollTop = messagesArea.scrollHeight;
+    },
+    onAudioChunk: (data) => {
+      if (data.type === 'text') {
+        if (!currentAssistantDiv) {
+          currentAssistantDiv = addMessage('assistant', '');
         }
-
-        if (this.isDragging) {
-          this.container.style.left = `${this.containerPosX + deltaX}px`;
-          this.container.style.top = `${this.containerPosY + deltaY}px`;
-        }
-      };
-
-      const onMouseUp = () => {
-        document.removeEventListener("mousemove", onMouseMove);
-        document.removeEventListener("mouseup", onMouseUp);
-        document.removeEventListener("touchmove", onMouseMove);
-        document.removeEventListener("touchend", onMouseUp);
-
-        // Optional: snap to viewport edges if needed
-      };
-
-      document.addEventListener("mousemove", onMouseMove);
-      document.addEventListener("mouseup", onMouseUp);
-      document.addEventListener("touchmove", onMouseMove);
-      document.addEventListener("touchend", onMouseUp);
-    };
-
-    handles.forEach((handle) => {
-      handle.addEventListener("mousedown", onMouseDown);
-      handle.addEventListener("touchstart", onMouseDown, { passive: true });
-    });
-  }
-
-  private initAudioContext() {
-    if (this.audioContext) return;
-
-    try {
-      // @ts-expect-error: webkitAudioContext is for older browsers
-      const ContextClass = window.AudioContext || window.webkitAudioContext;
-      this.audioContext = new ContextClass();
-      this.gainNode = this.audioContext.createGain();
-      this.gainNode.connect(this.audioContext.destination);
-    } catch (e) {
-      console.error("[MakaseteAI] Failed to initialize AudioContext:", e);
-    }
-  }
-
-  private async resumeAudioContext() {
-    this.initAudioContext();
-    if (this.audioContext && this.audioContext.state === "suspended") {
-      await this.audioContext.resume();
-    }
-  }
-
-  private async waitForData() {
-    let title = "AIアシスタント";
-    let initialMsg = "AIアシスタントです。何かお手伝いできることはありますか？";
-    let primaryColor = "";
-
-    try {
-      // This endpoint blocks until data is fetched from Sheets on the server
-      const healthResponse = await fetch(`${this.serverUrl}/health`);
-      if (!healthResponse.ok) {
-        console.warn("[MakaseteAI] Failed to verify data readiness");
+        currentAssistantDiv.textContent += (data.content as string);
+        messagesArea.scrollTop = messagesArea.scrollHeight;
+      } else if (data.type === 'audio') {
+        audio.handleAudioChunk(data.content);
       }
+    },
+    onError: (message) => {
+      addMessage('assistant', `Error: ${message}`);
+      setInputLocked(false);
+      currentAssistantDiv = null;
+    },
+    onResponseComplete: () => {
+      setInputLocked(false);
+      currentAssistantDiv = null;
+      input.focus();
+    },
+    onConnect: () => {
+      console.log('[MakaseteAI] Connected');
+    },
+  });
 
-      // Try to fetch settings
-      const settingsResponse = await fetch(`${this.serverUrl}/api/settings`);
-      if (settingsResponse.ok) {
-        const settingsData = await settingsResponse.json();
-        
-        if (settingsData && Array.isArray(settingsData) && settingsData.length > 0) {
-          // Check if it's key-value format (has 'key' and 'value' properties)
-          if ("key" in settingsData[0] && "value" in settingsData[0]) {
-            for (const row of settingsData) {
-              const k = normalizeSettingKey(row.key);
-              if (k === "chattitle" || k === "title") title = row.value;
-              if (k === "initialmessage" || k === "greeting") initialMsg = row.value;
-              if (k === "primarycolor" || k === "color") primaryColor = row.value;
-            }
-          } else {
-            // Assume row format (single row with columns as properties)
-            const row = settingsData[0];
-            // Headers are already snake_cased by the server
-            if (row.chat_title || row.title) title = row.chat_title || row.title;
-            if (row.initial_message || row.greeting) initialMsg = row.initial_message || row.greeting;
-            if (row.primary_color || row.color) primaryColor = row.primary_color || row.color;
-          }
-        }
-      }
-    } catch (e) {
-      console.error("[MakaseteAI] Error fetching initial data/settings:", e);
-    } finally {
-      this.chatTitle.textContent = title;
-      this.appendMessage("makasete-server", initialMsg);
-      
-      if (primaryColor) {
-          // Apply dynamic primary color to the shadow host
-          const host = this.shadowRoot.host as HTMLElement;
-          host.style.setProperty('--primary-color', primaryColor);
-      }
-
-      this.loadingOverlay.classList.add("hidden");
-    }
-  }
-
-  private initSocket() {
-    this.socket.on("connect", () => {
-      // Socket connected
-    });
-
-    this.socket.on("text-chunk", (data: { content: string }) => {
-      this.appendMessage("makasete-server", data.content, true);
-    });
-
-    this.socket.on(
-      "audio-chunk",
-      async (data: { type: "text" | "audio"; content: unknown }) => {
-        if (data.type === "text") {
-          this.appendMessage("makasete-server", data.content as string, true);
-        } else if (data.type === "audio") {
-          this.handleAudioChunk(data.content);
-        }
-      },
-    );
-
-    this.socket.on("error", (data: { message: string }) => {
-      console.error("[MakaseteAI] Server error:", data.message);
-      this.appendMessage(
-        "makasete-server",
-        `エラーが発生しました: ${data.message}`,
-      );
-    });
-  }
-
-  private handleAudioChunk(content: unknown) {
-    let rawData: ArrayBuffer;
-    if (content instanceof ArrayBuffer) {
-      rawData = content;
-    } else if (
-      content &&
-      typeof content === "object" &&
-      "data" in content &&
-      (content as BufferData).type === "Buffer"
-    ) {
-      rawData = new Uint8Array((content as BufferData).data).buffer;
-    } else if (content instanceof Uint8Array) {
-      rawData = content.buffer as ArrayBuffer;
-    } else {
-      console.warn("[MakaseteAI] Unexpected audio format");
-      return;
-    }
-
-    this.audioQueue.push(rawData);
-    this.playNextInQueue();
-  }
-
-  private async playNextInQueue() {
-    if (this.isPlaying || this.audioQueue.length === 0) return;
-    if (!this.audioContext) this.initAudioContext();
-    if (!this.audioContext) return;
-
-    this.isPlaying = true;
-    const rawData = this.audioQueue.shift();
-
-    if (rawData) {
-      try {
-        // decodeAudioData consumes the buffer, so we pass a slice/copy
-        const audioBuffer = await this.audioContext.decodeAudioData(
-          rawData.slice(0),
-        );
-
-        const source = this.audioContext.createBufferSource();
-        source.buffer = audioBuffer;
-        if (this.gainNode) source.connect(this.gainNode);
-
-        this.currentSource = source;
-
-        source.onended = () => {
-          if (this.currentSource === source) {
-            this.currentSource = null;
-            this.isPlaying = false;
-            this.playNextInQueue();
-          }
-        };
-
-        source.start(0);
-      } catch (e) {
-        console.error("[MakaseteAI] Audio decode/play failed:", e);
-        this.isPlaying = false;
-        this.playNextInQueue();
-      }
-    } else {
-      this.isPlaying = false;
-    }
-  }
-
-  private resetAudioState() {
-    if (this.currentSource) {
-      try {
-        this.currentSource.stop();
-      } catch {
-        // Source might already be stopped
-      }
-      this.currentSource = null;
-    }
-    this.isPlaying = false;
-    this.audioQueue = [];
-  }
-
-  private sendMessage(isVoice = false) {
-    const text = this.input.value.trim();
+  // --- Send ---
+  function sendMessage(isVoiceInput = false): void {
+    const text = input.value.trim();
     if (!text) return;
 
-    const useAudio = isVoice || this.isAudioEnabled;
-    this.appendMessage("user", text);
-    this.input.value = "";
-    this.updateInputActions();
-    this.showTypingIndicator();
+    input.value = '';
+    setInputLocked(true);
+    currentAssistantDiv = null;
 
-    if (useAudio) {
-      this.resetAudioState();
-      this.resumeAudioContext().catch(console.error);
+    addMessage('user', text);
+
+    if (isVoiceInput) {
+      audio.resumeAudioContext();
+      audio.resetAudioState();
     }
 
-    this.socket.emit("user-input", {
-      text,
-      isVoiceInput: useAudio,
-    });
+    socket.sendUserInput(text, isVoiceInput, language);
   }
 
-  private updateInputActions() {
-    const hasText = this.input.value.trim().length > 0;
-    this.sendBtn.style.display = hasText ? "flex" : "none";
-    this.micBtn.style.display = hasText ? "none" : "flex";
-  }
+  sendBtn.addEventListener('click', () => sendMessage(false));
+  input.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.key === 'Enter') sendMessage(false);
+  });
 
-  private bindEvents() {
-    this.launcherBtn.addEventListener("click", () => {
-      if (this.isDragging) return; // Prevent toggle if dragging
-      const isOpen = this.chatWindow.classList.toggle("open");
-      
-      // Prevent body scrolling when open on mobile
-      if (window.innerWidth <= 600) {
-        document.body.style.overflow = isOpen ? "hidden" : "";
-      }
-
-      if (isOpen) {
-        this.resumeAudioContext().catch(console.error);
-      } else {
-        this.resetAudioState();
-      }
-    });
-
-    this.sendBtn.addEventListener("click", () => {
-      this.resumeAudioContext().catch(console.error);
-      this.sendMessage();
-    });
-
-    this.input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault();
-        this.resumeAudioContext().catch(console.error);
-        this.sendMessage();
-      }
-    });
-
-    this.micBtn.addEventListener("click", () => {
-      this.resumeAudioContext().catch(console.error);
-      this.toggleRecording();
-    });
-
-    this.input.addEventListener("input", () => {
-      this.updateInputActions();
-    });
-
-    const closeBtn = this.shadowRoot.querySelector(".close-btn");
-    if (closeBtn) {
-      closeBtn.addEventListener("click", () => {
-        this.chatWindow.classList.remove("open");
-        document.body.style.overflow = ""; // Ensure scroll is restored
-        this.resetAudioState();
-      });
+  micBtn.addEventListener('click', () => {
+    if (!audio.isSpeechRecognitionSupported()) {
+      alert('音声認識はこのブラウザでは利用できません');
+      return;
     }
-  }
+    audio.initAudioContext();
+    audio.toggleRecording();
+    micBtn.classList.toggle('recording');
+  });
 
-  private initSpeechRecognition() {
-    const SpeechRecognition =
-      window.SpeechRecognition || window.webkitSpeechRecognition;
+  // --- Drag ---
+  let isDragging = false;
+  let dragOffsetX = 0;
+  let dragOffsetY = 0;
 
-    if (SpeechRecognition) {
-      const recognition = new SpeechRecognition();
-      this.recognition = recognition;
-      recognition.lang = "ja-JP";
-      recognition.continuous = false;
-      recognition.interimResults = false;
+  header.addEventListener('mousedown', (e: MouseEvent) => {
+    isDragging = true;
+    const rect = container.getBoundingClientRect();
+    dragOffsetX = e.clientX - rect.left;
+    dragOffsetY = e.clientY - rect.top;
+  });
 
-      recognition.onresult = (event: SpeechRecognitionEvent) => {
-        const text = event.results[0][0].transcript;
-        this.input.value = text;
-        this.resumeAudioContext().catch(console.error);
-        this.sendMessage(true);
-      };
+  document.addEventListener('mousemove', (e: MouseEvent) => {
+    if (!isDragging) return;
+    container.style.right = 'auto';
+    container.style.bottom = 'auto';
+    container.style.left = `${e.clientX - dragOffsetX}px`;
+    container.style.top = `${e.clientY - dragOffsetY}px`;
+  });
 
-      recognition.onend = () => {
-        this.isRecording = false;
-        this.micBtn.classList.remove("recording");
-      };
-    } else {
-      console.warn("Speech Recognition not supported");
-      this.micBtn.style.display = "none";
-    }
-  }
-
-  private toggleRecording() {
-    if (!this.recognition) return;
-
-    if (this.isRecording) {
-      this.recognition.stop();
-    } else {
-      this.recognition.start();
-      this.isRecording = true;
-      this.micBtn.classList.add("recording");
-    }
-  }
-
-  private currentMakaseteServerMessageRaw: string = "";
-
-  private appendMessage(
-    role: "user" | "makasete-server",
-    text: string,
-    appendToLast = false,
-  ) {
-    if (role === "makasete-server") {
-      this.hideTypingIndicator();
-    }
-
-    if (appendToLast && role === "makasete-server") {
-      const lastMsg = this.timeline.lastElementChild;
-      if (lastMsg && lastMsg.classList.contains("makasete-server")) {
-        this.currentMakaseteServerMessageRaw += text;
-        lastMsg.innerHTML = formatMessageText(this.currentMakaseteServerMessageRaw);
-        this.scrollToBottom();
-        return;
-      }
-    }
-
-    if (role === "makasete-server") {
-      this.currentMakaseteServerMessageRaw = text;
-    }
-
-    const div = document.createElement("div");
-    div.className = `message ${role}`;
-    div.innerHTML = formatMessageText(text);
-    this.timeline.appendChild(div);
-    this.scrollToBottom();
-  }
-
-  private showTypingIndicator() {
-    if (this.timeline.querySelector(".typing-indicator")) return;
-    const div = document.createElement("div");
-    div.className = "typing-indicator";
-    div.innerHTML = `
-            <div class="typing-dot"></div>
-            <div class="typing-dot"></div>
-            <div class="typing-dot"></div>
-        `;
-    this.timeline.appendChild(div);
-    this.scrollToBottom();
-  }
-
-  private hideTypingIndicator() {
-    const indicator = this.timeline.querySelector(".typing-indicator");
-    if (indicator) {
-      indicator.remove();
-    }
-  }
-
-  private scrollToBottom() {
-    requestAnimationFrame(() => {
-      this.timeline.scrollTop = this.timeline.scrollHeight;
-    });
-  }
+  document.addEventListener('mouseup', () => {
+    isDragging = false;
+  });
 }
