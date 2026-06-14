@@ -1,10 +1,8 @@
 name: Claude Code Review
 
 on:
-  # pull_request:
-    # types: [opened, synchronize, ready_for_review, 
-  issue_comment:
-    types: [created]
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
     # Optional: Only run on specific file changes
     # paths:
     #   - "src/**/*.ts"
@@ -29,7 +27,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
