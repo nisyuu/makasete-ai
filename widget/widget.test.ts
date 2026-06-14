@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 interface CapturedSocketOpts {
     serverUrl: string;
@@ -81,6 +81,11 @@ describe('initChatWidget (rich UI)', () => {
         vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: true } as Response)));
     });
 
+    afterEach(() => {
+        // stubGlobal(innerWidth / fetch) のテスト間汚染を防ぐ
+        vi.unstubAllGlobals();
+    });
+
     it('should mount the launcher and chat window with the configured title and placeholder', () => {
         initChatWidget({ title: 'My Bot', placeholder: 'Ask...' });
         const { launcherBtn, chatWindow, chatTitle, input } = getEls();
@@ -123,6 +128,33 @@ describe('initChatWidget (rich UI)', () => {
         expect(socketHandler.sendUserInput).toHaveBeenCalledWith('hello', false, 'ja');
         expect(input.value).toBe('');
         expect(timeline.querySelector('.message.user')?.innerHTML).toBe('hello');
+    });
+
+    it('should lock body scroll on mobile when opening and restore it when closing via the launcher', () => {
+        vi.stubGlobal('innerWidth', 500);
+        initChatWidget();
+        const { launcherBtn, chatWindow } = getEls();
+
+        launcherBtn.click(); // open
+        expect(chatWindow.classList.contains('open')).toBe(true);
+        expect(document.body.style.overflow).toBe('hidden');
+
+        launcherBtn.click(); // close via launcher
+        expect(chatWindow.classList.contains('open')).toBe(false);
+        expect(document.body.style.overflow).toBe('');
+        expect(audioHandler.resetAudioState).toHaveBeenCalled();
+    });
+
+    it('should log an error when the health check request fails', async () => {
+        const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('network down'))));
+
+        initChatWidget();
+        // fetch の rejection を処理する .catch を待つ
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(errSpy).toHaveBeenCalledWith('[MakaseteAI] Error waiting for data:', expect.any(Error));
+        errSpy.mockRestore();
     });
 
     it('should ignore empty sends', () => {

@@ -19,10 +19,25 @@ export default defineConfig({
         "widget/vite.config.ts",
       ],
       thresholds: {
+        // 全体（フロント + バック合算）の下限
         statements: 80,
         branches: 80,
         functions: 80,
         lines: 80,
+        // バックエンド（server/）単体で 80% 以上を保証する
+        "server/**": {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
+        // フロントエンド（widget/）単体で 80% 以上を保証する
+        "widget/**": {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
       },
     },
   },

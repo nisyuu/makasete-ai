@@ -51,6 +51,27 @@ describe('ElevenLabsTTSService', () => {
         expect(Buffer.concat(chunks).toString()).toBe('chunk1chunk2');
     });
 
+    it('should fall back to default voice and model IDs when config values are empty', async () => {
+        const originalVoice = config.voiceId;
+        const originalModel = config.modelId;
+        config.voiceId = '';
+        config.modelId = '';
+        convert.mockResolvedValue((async function* () {
+            yield Buffer.from('x');
+        })());
+
+        const svc = new ElevenLabsTTSService();
+        await svc.generateSpeechStream('hello');
+
+        expect(convert).toHaveBeenCalledWith(
+            'AYFJOmHxRJdmf572TQ7R',
+            expect.objectContaining({ modelId: 'eleven_flash_v2_5' }),
+        );
+
+        config.voiceId = originalVoice;
+        config.modelId = originalModel;
+    });
+
     it('should rethrow and log when the client fails', async () => {
         const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
         convert.mockRejectedValue(new Error('api down'));
