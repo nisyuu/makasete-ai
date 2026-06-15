@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import fs from 'fs';
 
 const { synthesize, GoogleAuth, texttospeech } = vi.hoisted(() => {
     const synthesize = vi.fn();
@@ -27,8 +28,54 @@ describe('GeminiTTSService', () => {
         delete process.env.K_SERVICE;
     });
 
+    afterEach(() => {
+        vi.restoreAllMocks();
+        delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
+        delete process.env.K_SERVICE;
+    });
+
+    // 認証情報の解決分岐（env var / ローカルキー / Cloud Run）を検証する。
+    const okAudio = (_req: unknown, cb: (e: unknown, r: unknown) => void) =>
+        cb(null, { data: { audioContent: Buffer.from('x').toString('base64') } });
+
     it('should expose its name', () => {
         expect(new GeminiTTSService().getName()).toBe('gemini-tts');
+    });
+
+    it('should use GOOGLE_APPLICATION_CREDENTIALS when the env var is set', async () => {
+        process.env.GOOGLE_APPLICATION_CREDENTIALS = '/secrets/creds.json';
+        synthesize.mockImplementation(okAudio);
+
+        await new GeminiTTSService().generateSpeechStream('hi');
+
+        expect(GoogleAuth).toHaveBeenCalledWith(
+            expect.objectContaining({ keyFile: '/secrets/creds.json' }),
+        );
+    });
+
+    it('should fall back to a local key file when present', async () => {
+        vi.spyOn(fs, 'existsSync').mockReturnValue(true);
+        synthesize.mockImplementation(okAudio);
+
+        await new GeminiTTSService().generateSpeechStream('hi');
+
+        expect(GoogleAuth).toHaveBeenCalledWith(
+            expect.objectContaining({ keyFile: expect.stringContaining('google-key.json') }),
+        );
+    });
+
+    it('should not warn on Cloud Run (K_SERVICE set) when no credentials are found', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        process.env.K_SERVICE = 'makasete-service';
+        vi.spyOn(fs, 'existsSync').mockReturnValue(false);
+        synthesize.mockImplementation(okAudio);
+
+        await new GeminiTTSService().generateSpeechStream('hi');
+
+        expect(warnSpy).not.toHaveBeenCalled();
+        expect(GoogleAuth).toHaveBeenCalledWith(
+            expect.objectContaining({ keyFile: undefined }),
+        );
     });
 
     it('should synthesize plain text and return a readable stream of decoded audio', async () => {

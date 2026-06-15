@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import fs from 'fs';
 import { mapRowsToObjects, getAllSheetData, getInternalSheetData, fetchAllSheets, getSystemPrompt } from './sheets';
 import { google } from 'googleapis';
 import { config } from '../config';
@@ -199,6 +200,82 @@ describe('sheets service utilities', () => {
             await expect(fetchAllSheets()).resolves.toBeUndefined();
             expect(errSpy).toHaveBeenCalled();
             errSpy.mockRestore();
+        });
+    });
+
+    describe('getSheetsClient authentication resolution', () => {
+        // getSheetsClient は内部関数なので fetchAllSheets 経由で認証分岐を検証する。
+        beforeEach(() => {
+            vi.clearAllMocks();
+            config.googleSheetsId = 'test-id';
+            delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
+        });
+
+        afterEach(() => {
+            vi.restoreAllMocks();
+            delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
+        });
+
+        // メタデータ取得だけ成功させ、シートが無い状態で早期に完了させる。
+        function stubEmptySpreadsheet() {
+            const sheets = google.sheets({ version: 'v4' });
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (sheets.spreadsheets.get as any).mockResolvedValue({ data: { sheets: [] } });
+        }
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        function lastAuthOptions(): any {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const calls = (google.auth.GoogleAuth as any).mock.calls;
+            return calls[calls.length - 1][0];
+        }
+
+        it('uses GOOGLE_APPLICATION_CREDENTIALS when the env var is set', async () => {
+            process.env.GOOGLE_APPLICATION_CREDENTIALS = '/secrets/creds.json';
+            const existsSpy = vi.spyOn(fs, 'existsSync');
+            stubEmptySpreadsheet();
+
+            await fetchAllSheets();
+
+            expect(lastAuthOptions().keyFile).toBe('/secrets/creds.json');
+            // env var が優先されるためローカルキーは参照されない。
+            expect(existsSpy).not.toHaveBeenCalled();
+        });
+
+        it('falls back to a non-empty local key file', async () => {
+            vi.spyOn(fs, 'existsSync').mockReturnValue(true);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            vi.spyOn(fs, 'statSync').mockReturnValue({ size: 128 } as any);
+            stubEmptySpreadsheet();
+
+            await fetchAllSheets();
+
+            expect(lastAuthOptions().keyFile).toContain('google-key.json');
+        });
+
+        it('ignores an empty local key file', async () => {
+            vi.spyOn(fs, 'existsSync').mockReturnValue(true);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            vi.spyOn(fs, 'statSync').mockReturnValue({ size: 0 } as any);
+            stubEmptySpreadsheet();
+
+            await fetchAllSheets();
+
+            expect(lastAuthOptions().keyFile).toBeUndefined();
+        });
+
+        it('warns and continues when the local key file cannot be read', async () => {
+            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+            vi.spyOn(fs, 'existsSync').mockReturnValue(true);
+            vi.spyOn(fs, 'statSync').mockImplementation(() => {
+                throw new Error('EACCES');
+            });
+            stubEmptySpreadsheet();
+
+            await fetchAllSheets();
+
+            expect(warnSpy).toHaveBeenCalled();
+            expect(lastAuthOptions().keyFile).toBeUndefined();
         });
     });
 });
