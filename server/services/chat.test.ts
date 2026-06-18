@@ -7,7 +7,7 @@ const { getAllSheetData, generateResponseStream, generateSpeechStream, getTTSSer
         getAllSheetData: vi.fn(),
         generateResponseStream: vi.fn(),
         generateSpeechStream,
-        getTTSService: vi.fn(() => ({ generateSpeechStream, getName: () => 'mock' })),
+        getTTSService: vi.fn(() => ({ generateSpeechStream, getName: (): string => 'mock' })),
     };
 });
 
