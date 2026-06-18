@@ -37,8 +37,10 @@ function rowToProduct(row: SheetData): Product {
 
 function scoreProduct(query: string, product: Product): number {
   const queryLower = query.toLowerCase();
+  // Split on ASCII whitespace/punctuation first, then split each part on ideographic space (U+3000)
   const tokens = queryLower
-    .split(/[\s,、。！？　]+/)
+    .split(/[\s,、。！？]+/)
+    .flatMap((t) => t.split(String.fromCodePoint(0x3000)))
     .filter((t) => t.length >= 2);
 
   if (tokens.length === 0) return 0;
