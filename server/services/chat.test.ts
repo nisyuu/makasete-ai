@@ -157,6 +157,37 @@ describe('ChatService', () => {
             expect(socket.emit).toHaveBeenCalledWith('response-complete');
             errSpy.mockRestore();
         });
+
+        it('should start TTS concurrently for multiple sentences', async () => {
+            generateResponseStream.mockResolvedValue(makeStream(['こんにちは。', '元気ですか？']));
+            // beforeEach provides mockImplementation that creates a fresh stream per call
+            const socket = makeSocket();
+            const svc = new ChatService();
+
+            await svc.handleUserInput(socket as never, { text: 'hi', isVoiceInput: true });
+
+            // TTS called once per sentence
+            expect(generateSpeechStream).toHaveBeenCalledTimes(2);
+            // Audio emitted in order for both sentences
+            const audioEmits = socket.emit.mock.calls.filter(
+                (c) => c[0] === 'audio-chunk' && c[1].type === 'audio',
+            );
+            expect(audioEmits).toHaveLength(2);
+        });
+
+        it('should apply SSML pause breaks for Google TTS', async () => {
+            getTTSService.mockReturnValueOnce({ generateSpeechStream, getName: () => 'gemini-tts' });
+            generateResponseStream.mockResolvedValue(makeStream(['やあ。']));
+            generateSpeechStream.mockResolvedValue(Readable.from([Buffer.from('A')]));
+            const socket = makeSocket();
+            const svc = new ChatService();
+
+            await svc.handleUserInput(socket as never, { text: 'hi', isVoiceInput: true });
+
+            const ttsArg = generateSpeechStream.mock.calls[0][0];
+            expect(ttsArg).toContain('<speak>');
+            expect(ttsArg).toContain('<break time="300ms"/>');
+        });
     });
 
     describe('history management', () => {
