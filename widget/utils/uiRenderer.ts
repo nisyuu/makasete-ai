@@ -1,4 +1,5 @@
 import { formatMessageText } from "./text";
+import type { Product } from "../types";
 
 export interface UIElements {
   container: HTMLElement;
@@ -125,6 +126,60 @@ export function appendMessage(
   div.className = `message ${role}`;
   div.innerHTML = formatMessageText(text);
   timeline.appendChild(div);
+  scrollToBottom(timeline);
+}
+
+function escapeHtml(str: string): string {
+  return str.replace(
+    /[&<>"']/g,
+    (m) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[m] || m,
+  );
+}
+
+/**
+ * 商品レコメンデーションカードをタイムラインに追加する。
+ * 既存のレコメンデーションがある場合は置き換える。
+ */
+export function appendRecommendations(timeline: HTMLElement, products: Product[]): void {
+  const existing = timeline.querySelector(".recommendations");
+  if (existing) existing.remove();
+
+  if (products.length === 0) return;
+
+  const container = document.createElement("div");
+  container.className = "recommendations";
+
+  for (const product of products) {
+    const isValidUrl = /^https?:\/\//.test(product.url);
+    const isValidImageUrl = /^https?:\/\//.test(product.image_url);
+
+    const card = document.createElement(isValidUrl ? "a" : "div");
+    card.className = "product-card";
+    if (isValidUrl && card instanceof HTMLAnchorElement) {
+      card.href = product.url;
+      card.target = "_blank";
+      card.rel = "noopener noreferrer";
+    }
+
+    const imageHtml = isValidImageUrl
+      ? `<img class="product-image" src="${escapeHtml(product.image_url)}" alt="${escapeHtml(product.name)}" loading="lazy">`
+      : "";
+
+    const descHtml = product.description
+      ? `<div class="product-desc">${escapeHtml(product.description)}</div>`
+      : "";
+
+    const priceHtml = product.price
+      ? `<div class="product-price">${escapeHtml(product.price)}</div>`
+      : "";
+
+    card.innerHTML = `${imageHtml}<div class="product-info"><div class="product-name">${escapeHtml(product.name)}</div>${descHtml}${priceHtml}</div>`;
+
+    container.appendChild(card);
+  }
+
+  timeline.appendChild(container);
   scrollToBottom(timeline);
 }
 

@@ -10,6 +10,7 @@ import {
   hasTags,
   removeMarkdownLinks,
 } from "../utils/text";
+import { getRecommendations } from "./recommendations";
 
 export class ChatService {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -59,6 +60,11 @@ export class ChatService {
         role: "model",
         parts: [{ text: fullResponseText }],
       });
+
+      const recommendations = getRecommendations(text, allData);
+      if (recommendations.length > 0) {
+        socket.emit("recommendation", { products: recommendations });
+      }
 
       socket.emit("response-complete");
     } catch (error: unknown) {
