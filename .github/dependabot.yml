@@ -8,6 +8,22 @@ updates:
       interval: "weekly"
       time: "09:00"
       timezone: "Asia/Tokyo"
+    groups:
+      patch-updates:
+        patterns:
+          - "*"
+        update-types:
+          - "patch"
+      minor-updates:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+      major-updates:
+        patterns:
+          - "*"
+        update-types:
+          - "major"
   - package-ecosystem: "npm"
     directory: "/"
     target-branch: "develop"
@@ -16,6 +32,22 @@ updates:
       interval: "weekly"
       time: "09:00"
       timezone: "Asia/Tokyo"
+    groups:
+      patch-updates:
+        patterns:
+          - "*"
+        update-types:
+          - "patch"
+      minor-updates:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+      major-updates:
+        patterns:
+          - "*"
+        update-types:
+          - "major"
   - package-ecosystem: "terraform"
     directory: "/terraform"
     target-branch: "develop"
@@ -24,3 +56,19 @@ updates:
       interval: "weekly"
       time: "09:00"
       timezone: "Asia/Tokyo"
+    groups:
+      patch-updates:
+        patterns:
+          - "*"
+        update-types:
+          - "patch"
+      minor-updates:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+      major-updates:
+        patterns:
+          - "*"
+        update-types:
+          - "major"
