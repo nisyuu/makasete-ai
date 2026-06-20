@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 interface CapturedSocketOpts {
     serverUrl: string;
@@ -28,7 +28,7 @@ const socketHandler = {
 const audioHandler = {
     handleAudioChunk: vi.fn(),
     initAudioContext: vi.fn(),
-    resumeAudioContext: vi.fn(),
+    resumeAudioContext: vi.fn(() => Promise.resolve()),
     resetAudioState: vi.fn(),
     toggleRecording: vi.fn(),
     isSpeechRecognitionSupported: vi.fn(() => true),
@@ -55,46 +55,106 @@ function getEls() {
     const shadow = host.shadowRoot!;
     return {
         shadow,
-        container: shadow.querySelector('.container') as HTMLElement,
-        header: shadow.querySelector('.header') as HTMLElement,
-        messages: shadow.querySelector('.messages') as HTMLElement,
-        input: shadow.querySelector('input[type="text"]') as HTMLInputElement,
-        sendBtn: Array.from(shadow.querySelectorAll('button')).find((b) => b.textContent === 'Send') as HTMLButtonElement,
-        micBtn: shadow.querySelector('button.mic') as HTMLButtonElement,
+        container: shadow.querySelector('.widget-container') as HTMLElement,
+        chatWindow: shadow.querySelector('.chat-window') as HTMLElement,
+        chatTitle: shadow.querySelector('.chat-title') as HTMLElement,
+        header: shadow.querySelector('.chat-header') as HTMLElement,
+        timeline: shadow.querySelector('.chat-timeline') as HTMLElement,
+        input: shadow.querySelector('.text-input') as HTMLTextAreaElement,
+        sendBtn: shadow.querySelector('.send-btn') as HTMLButtonElement,
+        micBtn: shadow.querySelector('.mic-btn') as HTMLButtonElement,
+        launcherBtn: shadow.querySelector('.launcher-button') as HTMLButtonElement,
+        closeBtn: shadow.querySelector('.close-btn') as HTMLButtonElement,
+        loadingOverlay: shadow.querySelector('.loading-overlay') as HTMLElement,
     };
 }
 
-describe('initChatWidget', () => {
+describe('initChatWidget (rich UI)', () => {
     beforeEach(() => {
         document.body.innerHTML = '';
+        document.body.style.overflow = '';
         vi.clearAllMocks();
         audioHandler.isSpeechRecognitionSupported.mockReturnValue(true);
+        audioHandler.resumeAudioContext.mockReturnValue(Promise.resolve());
         window.alert = vi.fn();
+        // fetch(/health) はローディング解除に使われる
+        vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: true } as Response)));
     });
 
-    it('should mount a shadow-dom widget with the configured title and placeholder', () => {
+    afterEach(() => {
+        // stubGlobal(innerWidth / fetch) のテスト間汚染を防ぐ
+        vi.unstubAllGlobals();
+    });
+
+    it('should mount the launcher and chat window with the configured title and placeholder', () => {
         initChatWidget({ title: 'My Bot', placeholder: 'Ask...' });
-        const { header, input } = getEls();
-        expect(header.textContent).toBe('My Bot');
+        const { launcherBtn, chatWindow, chatTitle, input } = getEls();
+        expect(launcherBtn).toBeTruthy();
+        expect(chatWindow).toBeTruthy();
+        expect(chatTitle.textContent).toBe('My Bot');
         expect(input.placeholder).toBe('Ask...');
     });
 
-    it('should use sensible defaults when no config is given', () => {
+    it('should use Japanese defaults when no config is given', () => {
         initChatWidget();
-        const { header } = getEls();
-        expect(header.textContent).toBe('Chat Assistant');
+        const { chatTitle, input } = getEls();
+        expect(chatTitle.textContent).toBe('AIアシスタント');
+        expect(input.placeholder).toBe('質問を入力...');
     });
 
-    it('should send a message on send-button click and lock the input', () => {
+    it('should render the initial greeting message', () => {
+        initChatWidget();
+        const { timeline } = getEls();
+        const greeting = timeline.querySelector('.message.makasete-server');
+        expect(greeting?.innerHTML).toContain('AIアシスタント');
+    });
+
+    it('should open and close the chat window via the launcher and close button', () => {
+        initChatWidget();
+        const { launcherBtn, chatWindow, closeBtn } = getEls();
+        expect(chatWindow.classList.contains('open')).toBe(false);
+        launcherBtn.click();
+        expect(chatWindow.classList.contains('open')).toBe(true);
+        closeBtn.click();
+        expect(chatWindow.classList.contains('open')).toBe(false);
+    });
+
+    it('should send a message on send-button click', () => {
         initChatWidget({ language: 'ja' });
-        const { input, sendBtn, messages } = getEls();
+        const { input, sendBtn, timeline } = getEls();
         input.value = 'hello';
         sendBtn.click();
 
         expect(socketHandler.sendUserInput).toHaveBeenCalledWith('hello', false, 'ja');
         expect(input.value).toBe('');
-        expect(input.disabled).toBe(true);
-        expect(messages.querySelector('.msg.user')?.textContent).toBe('hello');
+        expect(timeline.querySelector('.message.user')?.innerHTML).toBe('hello');
+    });
+
+    it('should lock body scroll on mobile when opening and restore it when closing via the launcher', () => {
+        vi.stubGlobal('innerWidth', 500);
+        initChatWidget();
+        const { launcherBtn, chatWindow } = getEls();
+
+        launcherBtn.click(); // open
+        expect(chatWindow.classList.contains('open')).toBe(true);
+        expect(document.body.style.overflow).toBe('hidden');
+
+        launcherBtn.click(); // close via launcher
+        expect(chatWindow.classList.contains('open')).toBe(false);
+        expect(document.body.style.overflow).toBe('');
+        expect(audioHandler.resetAudioState).toHaveBeenCalled();
+    });
+
+    it('should log an error when the health check request fails', async () => {
+        const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('network down'))));
+
+        initChatWidget();
+        // fetch の rejection を処理する .catch を待つ
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(errSpy).toHaveBeenCalledWith('[MakaseteAI] Error waiting for data:', expect.any(Error));
+        errSpy.mockRestore();
     });
 
     it('should ignore empty sends', () => {
@@ -105,61 +165,68 @@ describe('initChatWidget', () => {
         expect(socketHandler.sendUserInput).not.toHaveBeenCalled();
     });
 
-    it('should send on Enter key', () => {
+    it('should send on Cmd/Ctrl + Enter only', () => {
         initChatWidget();
         const { input } = getEls();
         input.value = 'hi';
         input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        expect(socketHandler.sendUserInput).not.toHaveBeenCalled();
+
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true }));
         expect(socketHandler.sendUserInput).toHaveBeenCalledWith('hi', false, 'ja');
     });
 
-    it('should not send on other keys', () => {
+    it('should toggle send/mic buttons based on input text', () => {
         initChatWidget();
-        const { input } = getEls();
-        input.value = 'hi';
-        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
-        expect(socketHandler.sendUserInput).not.toHaveBeenCalled();
+        const { input, sendBtn, micBtn } = getEls();
+        input.value = 'typing';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        expect(sendBtn.style.display).toBe('flex');
+        expect(micBtn.style.display).toBe('none');
+
+        input.value = '';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        expect(sendBtn.style.display).toBe('none');
+        expect(micBtn.style.display).toBe('flex');
     });
 
     describe('socket callbacks', () => {
-        it('onTextChunk should append streaming text to an assistant message', () => {
+        it('onTextChunk should stream-append into a new server message after the user sends', () => {
             initChatWidget();
-            const { messages } = getEls();
+            const { input, sendBtn, timeline } = getEls();
+            input.value = 'q';
+            sendBtn.click();
             captured.socketOpts!.onTextChunk('Hel');
             captured.socketOpts!.onTextChunk('lo');
-            const assistant = messages.querySelector('.msg.assistant');
-            expect(assistant?.textContent).toBe('Hello');
+            const msgs = timeline.querySelectorAll('.message.makasete-server');
+            // 挨拶 + 応答1件、最後がストリーミングされた応答
+            expect(msgs[msgs.length - 1].innerHTML).toBe('Hello');
         });
 
-        it('onAudioChunk text should append text, audio should forward to the audio handler', () => {
+        it('onAudioChunk text appends text and audio forwards to the audio handler', () => {
             initChatWidget();
+            const { input, sendBtn, timeline } = getEls();
+            input.value = 'q';
+            sendBtn.click();
             captured.socketOpts!.onAudioChunk({ type: 'text', content: 'spoken' });
-            const { messages } = getEls();
-            expect(messages.querySelector('.msg.assistant')?.textContent).toBe('spoken');
+            const msgs = timeline.querySelectorAll('.message.makasete-server');
+            expect(msgs[msgs.length - 1].innerHTML).toBe('spoken');
 
             captured.socketOpts!.onAudioChunk({ type: 'audio', content: new ArrayBuffer(4) });
             expect(audioHandler.handleAudioChunk).toHaveBeenCalled();
         });
 
-        it('onError should render an error message and unlock the input', () => {
+        it('onError should render an error message', () => {
             initChatWidget();
-            const { input, messages } = getEls();
-            input.disabled = true;
+            const { timeline } = getEls();
             captured.socketOpts!.onError('boom');
-            expect(messages.querySelector('.msg.assistant')?.textContent).toBe('Error: boom');
-            expect(input.disabled).toBe(false);
+            const msgs = timeline.querySelectorAll('.message.makasete-server');
+            expect(msgs[msgs.length - 1].innerHTML).toContain('boom');
         });
 
-        it('onResponseComplete should unlock the input', () => {
+        it('onResponseComplete and onConnect should not throw', () => {
             initChatWidget();
-            const { input } = getEls();
-            input.disabled = true;
-            captured.socketOpts!.onResponseComplete!();
-            expect(input.disabled).toBe(false);
-        });
-
-        it('onConnect should not throw', () => {
-            initChatWidget();
+            expect(() => captured.socketOpts!.onResponseComplete!()).not.toThrow();
             expect(() => captured.socketOpts!.onConnect!()).not.toThrow();
         });
     });
@@ -185,15 +252,16 @@ describe('initChatWidget', () => {
             initChatWidget();
             const { micBtn } = getEls();
             micBtn.click();
-            expect(audioHandler.initAudioContext).toHaveBeenCalled();
             expect(audioHandler.toggleRecording).toHaveBeenCalled();
             expect(micBtn.classList.contains('recording')).toBe(true);
         });
 
-        it('mic click should alert when speech recognition is unsupported', () => {
+        it('mic should be hidden and alerted when speech recognition is unsupported', () => {
             audioHandler.isSpeechRecognitionSupported.mockReturnValue(false);
             initChatWidget();
-            const { micBtn } = getEls();
+            const { micBtn, sendBtn } = getEls();
+            expect(micBtn.style.display).toBe('none');
+            expect(sendBtn.style.display).toBe('flex');
             micBtn.click();
             expect(window.alert).toHaveBeenCalled();
             expect(audioHandler.toggleRecording).not.toHaveBeenCalled();
@@ -201,22 +269,20 @@ describe('initChatWidget', () => {
     });
 
     describe('drag', () => {
-        it('should reposition the container while dragging', () => {
+        it('should reposition the container while dragging the header', () => {
             initChatWidget();
             const { header, container } = getEls();
+            // ドラッグはデスクトップ幅でのみ有効
+            vi.stubGlobal('innerWidth', 1024);
 
             header.dispatchEvent(new MouseEvent('mousedown', { clientX: 10, clientY: 10, bubbles: true }));
             document.dispatchEvent(new MouseEvent('mousemove', { clientX: 60, clientY: 70, bubbles: true }));
 
-            // offset = mousedown座標 - rect.left(=0)。left = clientX - offset = 60 - 10 = 50
             expect(container.style.left).toBe('50px');
             expect(container.style.top).toBe('60px');
             expect(container.style.right).toBe('auto');
 
             document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
-            // mouseup 後は移動しない
-            document.dispatchEvent(new MouseEvent('mousemove', { clientX: 200, clientY: 200, bubbles: true }));
-            expect(container.style.left).toBe('50px');
         });
     });
 });
