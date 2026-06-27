@@ -43,9 +43,15 @@ describe('StreamBuffer', () => {
         expect(result).toEqual(['第一行', '第二行']);
     });
 
-    it('should ignore empty sentences', () => {
+    it('should filter out punctuation-only segments', () => {
         const buffer = new StreamBuffer();
         const result = buffer.add('。。。');
-        expect(result).toEqual(['。', '。', '。']); // Current implementation splits each punc
+        expect(result).toEqual([]); // Punctuation-only segments have no TTS content
+    });
+
+    it('should split text by ellipsis', () => {
+        const buffer = new StreamBuffer();
+        const result = buffer.add('そうですね…確かに。');
+        expect(result).toEqual(['そうですね…', '確かに。']);
     });
 });

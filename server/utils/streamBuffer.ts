@@ -1,6 +1,6 @@
 export class StreamBuffer {
     private buffer: string = "";
-    private readonly punctuations = ["。", "！", "？", "\n"]; // Removed "、" for better flow
+    private readonly punctuations = ["。", "！", "？", "\n", "…"]; // "…" added as sentence boundary
 
     public add(text: string): string[] {
         this.buffer += text;
@@ -20,7 +20,8 @@ export class StreamBuffer {
 
             if (earliestIndex !== -1) {
                 const sentence = this.buffer.slice(0, earliestIndex + foundPunctuation.length).trim();
-                if (sentence) {
+                // Skip punctuation-only segments — they produce no meaningful TTS audio
+                if (sentence && sentence.replace(/[\s。！？…\n]/g, "").length > 0) {
                     sentences.push(sentence);
                 }
                 this.buffer = this.buffer.slice(earliestIndex + foundPunctuation.length);
