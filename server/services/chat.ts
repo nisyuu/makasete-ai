@@ -11,6 +11,9 @@ import {
   removeMarkdownLinks,
 } from "../utils/text";
 
+// Minimum audio chunk size for reliable MP3 decoding in browsers (~0.25s at 128kbps)
+const MIN_AUDIO_CHUNK_BYTES = 4 * 1024;
+
 export class ChatService {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private chatHistory: any[] = [];
@@ -40,20 +43,45 @@ export class ChatService {
 
       let fullResponseText = "";
 
+      // Pipeline: audio emissions are chained to preserve sentence order while
+      // TTS generation runs concurrently with LLM streaming.
+      let audioEmitChain: Promise<void> = Promise.resolve();
+
+      const enqueueSentence = (sentence: string): void => {
+        const uiText = stripTags(sentence);
+
+        if (isVoiceInput) {
+          socket.emit("audio-chunk", { type: "text", content: uiText });
+
+          // Start TTS immediately (concurrent with LLM streaming and other sentences)
+          const streamPromise = this.startEagerTTSStream(sentence, ttsService, language);
+
+          // Chain: emit this sentence's audio only after the previous one finishes
+          audioEmitChain = audioEmitChain.then(() =>
+            this.drainStreamToSocket(socket, streamPromise),
+          );
+        } else {
+          socket.emit("text-chunk", { content: uiText });
+        }
+      };
+
       for await (const chunk of stream) {
         const chunkText = chunk.text();
         fullResponseText += chunkText;
 
         const sentences = streamBuffer.add(chunkText);
         for (const sentence of sentences) {
-          await this.processSentence(socket, sentence, isVoiceInput, ttsService, language);
+          enqueueSentence(sentence);
         }
       }
 
       const remaining = streamBuffer.flush();
       if (remaining) {
-        await this.processSentence(socket, remaining, isVoiceInput, ttsService, language);
+        enqueueSentence(remaining);
       }
+
+      // Wait for all audio to finish before signaling completion
+      await audioEmitChain;
 
       this.chatHistory.push({
         role: "model",
@@ -68,54 +96,92 @@ export class ChatService {
     }
   }
 
-  private async processSentence(
-    socket: Socket,
+  // Starts TTS generation eagerly (without awaiting the caller) and returns a
+  // paused stream. The stream buffers internally until drainStreamToSocket resumes it.
+  private async startEagerTTSStream(
     sentence: string,
-    isVoiceInput: boolean,
     ttsService: TTSService,
-    language = "ja",
-  ): Promise<void> {
-    const uiText = stripTags(sentence);
+    language: string,
+  ): Promise<NodeJS.ReadableStream | null> {
+    const ttsInput = this.prepareTTSInput(sentence, ttsService.getName());
+    if (!ttsInput) return null;
 
-    if (isVoiceInput) {
-      socket.emit("audio-chunk", { type: "text", content: uiText });
-
-      try {
-        let ttsInput: string;
-        if (hasTags(sentence)) {
-          const innerText = sentence.replace(/<\/?speak>/g, "").trim();
-          ttsInput = `<speak>${removeMarkdownLinks(innerText)}</speak>`;
-        } else {
-          ttsInput = cleanupForTTS(sentence);
-        }
-
-        if (!ttsInput.trim() || !stripTags(ttsInput).trim()) return;
-
-        const audioStream: NodeJS.ReadableStream =
-          await ttsService.generateSpeechStream(ttsInput, language);
-
-        const chunks: Buffer[] = [];
-        audioStream.on("data", (chunk: Buffer) => {
-          chunks.push(chunk);
-        });
-
-        await new Promise((resolve, reject) => {
-          audioStream.on("end", () => {
-            const fullBuffer = Buffer.concat(chunks);
-            socket.emit("audio-chunk", { type: "audio", content: fullBuffer });
-            setTimeout(resolve, 50);
-          });
-          audioStream.on("error", (err) => {
-            console.error("[TTS] Stream error:", err);
-            reject(err);
-          });
-        });
-      } catch (e: unknown) {
-        const message = e instanceof Error ? e.message : String(e);
-        console.error("TTS Error:", message);
-      }
-    } else {
-      socket.emit("text-chunk", { content: uiText });
+    try {
+      const audioStream = await ttsService.generateSpeechStream(ttsInput, language);
+      audioStream.pause(); // Buffer internally; drainStreamToSocket will resume
+      return audioStream;
+    } catch (e: unknown) {
+      console.error("[TTS] Failed to start stream:", e instanceof Error ? e.message : String(e));
+      return null;
     }
+  }
+
+  // Resumes a paused audio stream and forwards its data to the socket in
+  // minimum-size chunks for reliable MP3 decoding on the client.
+  private async drainStreamToSocket(
+    socket: Socket,
+    streamPromise: Promise<NodeJS.ReadableStream | null>,
+  ): Promise<void> {
+    const audioStream = await streamPromise;
+    if (!audioStream) return;
+
+    await new Promise<void>((resolve) => {
+      let pending = Buffer.alloc(0);
+
+      audioStream.on("data", (chunk: Buffer) => {
+        pending = Buffer.concat([pending, chunk]);
+        if (pending.length >= MIN_AUDIO_CHUNK_BYTES) {
+          socket.emit("audio-chunk", { type: "audio", content: pending });
+          pending = Buffer.alloc(0);
+        }
+      });
+
+      audioStream.on("end", () => {
+        if (pending.length > 0) {
+          socket.emit("audio-chunk", { type: "audio", content: pending });
+        }
+        resolve();
+      });
+
+      audioStream.on("error", (err) => {
+        console.error("[TTS] Stream error:", err);
+        resolve(); // Continue to next sentence rather than aborting the chain
+      });
+
+      audioStream.resume();
+    });
+  }
+
+  // Prepares the TTS input string, applying SSML pause tuning for Google TTS.
+  private prepareTTSInput(sentence: string, ttsProviderName: string): string | null {
+    if (hasTags(sentence)) {
+      const innerText = sentence.replace(/<\/?speak>/g, "").trim();
+      const ssmlContent = removeMarkdownLinks(innerText);
+      if (!ssmlContent.trim() || !ssmlContent.replace(/<[^>]*>/g, "").trim()) return null;
+      return `<speak>${ssmlContent}</speak>`;
+    }
+
+    const cleanedText = cleanupForTTS(sentence);
+    if (!cleanedText.trim()) return null;
+
+    // Google TTS supports SSML: insert break tags for natural Japanese prosody
+    if (ttsProviderName === "gemini-tts") {
+      return this.wrapInSSMLWithPauses(cleanedText);
+    }
+
+    return cleanedText;
+  }
+
+  // Wraps plain text in SSML and inserts pause breaks after Japanese/English punctuation.
+  private wrapInSSMLWithPauses(text: string): string {
+    // cleanupForTTS already escapes &; also escape < and > for valid XML
+    const safe = text.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    return `<speak>${safe
+      .replace(/。/g, '。<break time="300ms"/>')
+      .replace(/、/g, '、<break time="150ms"/>')
+      .replace(/！/g, '！<break time="300ms"/>')
+      .replace(/？/g, '？<break time="300ms"/>')
+      .replace(/…/g, '…<break time="500ms"/>')
+    }</speak>`;
   }
 }
