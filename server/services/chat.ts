@@ -10,6 +10,7 @@ import {
   hasTags,
   removeMarkdownLinks,
 } from "../utils/text";
+import { getRecommendations } from "./recommendations";
 
 // Minimum audio chunk size for reliable MP3 decoding in browsers (~0.25s at 128kbps)
 const MIN_AUDIO_CHUNK_BYTES = 4 * 1024;
@@ -87,6 +88,11 @@ export class ChatService {
         role: "model",
         parts: [{ text: fullResponseText }],
       });
+
+      const recommendations = getRecommendations(text, allData);
+      if (recommendations.length > 0) {
+        socket.emit("recommendation", { products: recommendations });
+      }
 
       socket.emit("response-complete");
     } catch (error: unknown) {

@@ -7,6 +7,7 @@ import {
   updateInputActions,
   showTypingIndicator,
   appendMessage,
+  appendRecommendations,
   hideLoadingOverlay,
   MessageState,
 } from "./utils/uiRenderer";
@@ -154,6 +155,9 @@ export function initChatWidget(config: WidgetConfig = {}): void {
     },
     onResponseComplete: () => {
       els.input.focus();
+    },
+    onRecommendation: (products) => {
+      appendRecommendations(els.timeline, products);
     },
     onConnect: () => {
       console.log("[MakaseteAI] Connected");
