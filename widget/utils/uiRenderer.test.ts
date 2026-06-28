@@ -7,10 +7,24 @@ import {
     hideTypingIndicator,
     scrollToBottom,
     appendMessage,
+    appendRecommendations,
     applyPrimaryColor,
     hideLoadingOverlay,
     MessageState,
 } from './uiRenderer';
+import type { Product } from '../types';
+
+function buildProduct(overrides: Partial<Product> = {}): Product {
+    return {
+        name: 'Coffee',
+        description: 'A nice cup',
+        price: '¥500',
+        image_url: 'https://example.com/img.png',
+        url: 'https://example.com/buy',
+        tags: '',
+        ...overrides,
+    };
+}
 
 function buildShadow(): ShadowRoot {
     const host = document.createElement('div');
@@ -125,6 +139,69 @@ describe('uiRenderer', () => {
             appendMessage(timeline, state, 'user', 'Q');
             appendMessage(timeline, state, 'makasete-server', 'A', true);
             expect(timeline.querySelectorAll('.message.makasete-server')).toHaveLength(1);
+        });
+    });
+
+    describe('appendRecommendations', () => {
+        let timeline: HTMLElement;
+
+        beforeEach(() => {
+            timeline = document.createElement('div');
+        });
+
+        it('should render a product card with all fields', () => {
+            appendRecommendations(timeline, [buildProduct()]);
+            const container = timeline.querySelector('.recommendations');
+            expect(container).toBeTruthy();
+            const card = container?.querySelector('.product-card');
+            expect(card?.tagName).toBe('A');
+            expect((card as HTMLAnchorElement).href).toBe('https://example.com/buy');
+            expect((card as HTMLAnchorElement).target).toBe('_blank');
+            expect((card as HTMLAnchorElement).rel).toBe('noopener noreferrer');
+            expect(card?.querySelector('.product-image')).toBeTruthy();
+            expect(card?.querySelector('.product-name')?.textContent).toBe('Coffee');
+            expect(card?.querySelector('.product-desc')?.textContent).toBe('A nice cup');
+            expect(card?.querySelector('.product-price')?.textContent).toBe('¥500');
+        });
+
+        it('should render a div (not anchor) when the url is invalid', () => {
+            appendRecommendations(timeline, [buildProduct({ url: 'javascript:alert(1)' })]);
+            const card = timeline.querySelector('.product-card');
+            expect(card?.tagName).toBe('DIV');
+        });
+
+        it('should omit the image when the image url is invalid', () => {
+            appendRecommendations(timeline, [buildProduct({ image_url: 'not-a-url' })]);
+            expect(timeline.querySelector('.product-image')).toBeNull();
+        });
+
+        it('should omit description and price when they are empty', () => {
+            appendRecommendations(timeline, [buildProduct({ description: '', price: '' })]);
+            expect(timeline.querySelector('.product-desc')).toBeNull();
+            expect(timeline.querySelector('.product-price')).toBeNull();
+        });
+
+        it('should escape HTML in product fields', () => {
+            appendRecommendations(timeline, [
+                buildProduct({ name: '<img src=x onerror=alert(1)>', description: 'a & b "c"' }),
+            ]);
+            const name = timeline.querySelector('.product-name');
+            expect(name?.textContent).toBe('<img src=x onerror=alert(1)>');
+            expect(name?.querySelector('img')).toBeNull();
+            expect(timeline.querySelector('.product-desc')?.textContent).toBe('a & b "c"');
+        });
+
+        it('should replace existing recommendations rather than stacking them', () => {
+            appendRecommendations(timeline, [buildProduct({ name: 'First' })]);
+            appendRecommendations(timeline, [buildProduct({ name: 'Second' })]);
+            expect(timeline.querySelectorAll('.recommendations')).toHaveLength(1);
+            expect(timeline.querySelector('.product-name')?.textContent).toBe('Second');
+        });
+
+        it('should clear recommendations and render nothing when given an empty list', () => {
+            appendRecommendations(timeline, [buildProduct()]);
+            appendRecommendations(timeline, []);
+            expect(timeline.querySelector('.recommendations')).toBeNull();
         });
     });
 
