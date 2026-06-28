@@ -11,7 +11,7 @@ interface CapturedSocketOpts {
 }
 interface CapturedAudioOpts {
     onTranscript: (text: string) => void;
-    onRecordingEnd: () => void;
+    onRecordingEnd: (finalText: string) => void;
     language?: string;
 }
 
@@ -232,20 +232,33 @@ describe('initChatWidget (rich UI)', () => {
     });
 
     describe('voice', () => {
-        it('onTranscript should populate the input and send as voice', () => {
+        it('onTranscript should preview text in the input without sending', () => {
             initChatWidget();
+            const { input } = getEls();
             captured.audioOpts!.onTranscript('voice text');
+            // 認識途中のテキストは入力欄に表示されるだけで、まだ送信されない
+            expect(input.value).toBe('voice text');
+            expect(socketHandler.sendUserInput).not.toHaveBeenCalled();
+        });
+
+        it('onRecordingEnd should send the finalized text once as voice', () => {
+            initChatWidget();
+            const { micBtn } = getEls();
+            micBtn.classList.add('recording');
+            captured.audioOpts!.onRecordingEnd('voice text');
+            expect(micBtn.classList.contains('recording')).toBe(false);
             expect(socketHandler.sendUserInput).toHaveBeenCalledWith('voice text', true, 'ja');
             expect(audioHandler.resumeAudioContext).toHaveBeenCalled();
             expect(audioHandler.resetAudioState).toHaveBeenCalled();
         });
 
-        it('onRecordingEnd should remove the recording class', () => {
+        it('onRecordingEnd with empty text should not send and just clear recording', () => {
             initChatWidget();
             const { micBtn } = getEls();
             micBtn.classList.add('recording');
-            captured.audioOpts!.onRecordingEnd();
+            captured.audioOpts!.onRecordingEnd('');
             expect(micBtn.classList.contains('recording')).toBe(false);
+            expect(socketHandler.sendUserInput).not.toHaveBeenCalled();
         });
 
         it('mic click should toggle recording when supported', () => {

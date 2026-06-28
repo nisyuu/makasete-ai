@@ -4,8 +4,10 @@ interface BufferData {
 }
 
 export interface AudioHandlerOptions {
+  /** 認識途中のテキスト（プレビュー用）。送信はしない。 */
   onTranscript: (text: string) => void;
-  onRecordingEnd: () => void;
+  /** 録音終了時に確定したテキストを渡す。空文字なら確定結果なし。 */
+  onRecordingEnd: (finalText: string) => void;
   onError?: (error: Error) => void;
   language?: string;
 }
@@ -45,6 +47,8 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
   // 音声認識
   let recognition: SpeechRecognition | null = null;
   let isRecording = false;
+  // 録音セッション中に確定した（isFinal）テキストを蓄積する
+  let finalTranscript = "";
 
   // --- AudioContext ---
 
@@ -161,21 +165,39 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
     recognition = rec;
     rec.lang = language === "en" ? "en-US" : "ja-JP";
     rec.continuous = false;
-    rec.interimResults = false;
+    // 認識途中の結果も受け取り、入力欄にプレビュー表示する。
+    // ただし送信は発話が確定して録音が終了する onend のタイミングで一度だけ行う。
+    rec.interimResults = true;
 
     rec.onresult = (event: SpeechRecognitionEvent) => {
-      const text = event.results[0][0].transcript;
-      onTranscript(text);
+      // 確定済みテキストは finalTranscript に蓄積し、未確定分のみ interim にまとめる。
+      // event.resultIndex 以降だけを走査することで、確定済み結果の二重加算を防ぐ。
+      let interim = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        const transcript = result[0].transcript;
+        if (result.isFinal) {
+          finalTranscript += transcript;
+        } else {
+          interim += transcript;
+        }
+      }
+      // プレビュー表示のみ（この時点では送信しない）
+      onTranscript(finalTranscript + interim);
     };
 
     rec.onend = () => {
       isRecording = false;
-      onRecordingEnd();
+      // 発話が確定したテキストを一度だけ確定通知する
+      const text = finalTranscript.trim();
+      finalTranscript = "";
+      onRecordingEnd(text);
     };
 
     rec.onerror = (event: SpeechRecognitionErrorEvent) => {
       isRecording = false;
-      onRecordingEnd();
+      finalTranscript = "";
+      onRecordingEnd("");
       onError?.(new Error(event.error));
     };
   }
@@ -186,6 +208,7 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
     if (isRecording) {
       recognition.stop();
     } else {
+      finalTranscript = "";
       recognition.start();
       isRecording = true;
     }
