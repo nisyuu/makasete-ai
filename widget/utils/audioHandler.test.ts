@@ -4,6 +4,22 @@ import { initAudioHandler } from './audioHandler';
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
+// SpeechRecognitionEvent を模した結果イベントを組み立てる。
+// results は配列ライク（length/添字アクセス）で、各要素は [{ transcript }] に isFinal を付与したもの。
+function makeResultEvent(
+    resultIndex: number,
+    items: { transcript: string; isFinal: boolean }[],
+) {
+    const results = items.map((it) => {
+        const result: { 0: { transcript: string }; isFinal: boolean } = {
+            0: { transcript: it.transcript },
+            isFinal: it.isFinal,
+        };
+        return result;
+    });
+    return { resultIndex, results: { ...results, length: results.length } };
+}
+
 // --- Web Audio API モック ---
 let createdSources: MockBufferSource[];
 let decodeShouldFail = false;
@@ -195,21 +211,63 @@ describe('initAudioHandler', () => {
             expect(rec.stop).toHaveBeenCalled();
         });
 
-        it('should deliver transcripts and end callbacks', () => {
+        it('should preview interim results without sending, then deliver the final text once on end', () => {
             const { opts } = setup();
             const rec = createdRecognitions[0];
-            rec.onresult!({ results: [[{ transcript: 'hello there' }]] });
-            expect(opts.onTranscript).toHaveBeenCalledWith('hello there');
 
+            // 認識途中（未確定）: 入力欄プレビュー用に onTranscript が呼ばれるだけ
+            rec.onresult!(makeResultEvent(0, [{ transcript: 'こん', isFinal: false }]));
+            expect(opts.onTranscript).toHaveBeenLastCalledWith('こん');
+            // この段階では確定通知（送信トリガー）は来ない
+            expect(opts.onRecordingEnd).not.toHaveBeenCalled();
+
+            // 確定
+            rec.onresult!(makeResultEvent(0, [{ transcript: 'こんにちは', isFinal: true }]));
+            expect(opts.onTranscript).toHaveBeenLastCalledWith('こんにちは');
+
+            // 録音終了で確定テキストを「一度だけ」渡す
             rec.onend!();
-            expect(opts.onRecordingEnd).toHaveBeenCalled();
+            expect(opts.onRecordingEnd).toHaveBeenCalledTimes(1);
+            expect(opts.onRecordingEnd).toHaveBeenCalledWith('こんにちは');
         });
 
-        it('should surface recognition errors', () => {
+        it('should accumulate multiple final segments without duplication', () => {
+            const { opts } = setup();
+            const rec = createdRecognitions[0];
+
+            rec.onresult!(makeResultEvent(0, [{ transcript: 'こんにちは', isFinal: true }]));
+            // event.results は累積。resultIndex 以降（新規分）だけを加算し、確定済みは再加算しない。
+            rec.onresult!(
+                makeResultEvent(1, [
+                    { transcript: 'こんにちは', isFinal: true },
+                    { transcript: 'また明日', isFinal: true },
+                ]),
+            );
+
+            rec.onend!();
+            expect(opts.onRecordingEnd).toHaveBeenCalledWith('こんにちはまた明日');
+        });
+
+        it('should reset accumulated text between recordings', () => {
+            const { handler, opts } = setup();
+            const rec = createdRecognitions[0];
+
+            rec.onresult!(makeResultEvent(0, [{ transcript: 'こんにちは', isFinal: true }]));
+            rec.onend!();
+
+            // 新しい録音を開始すると蓄積はクリアされる
+            handler.toggleRecording();
+            rec.onresult!(makeResultEvent(0, [{ transcript: 'さようなら', isFinal: true }]));
+            rec.onend!();
+
+            expect(opts.onRecordingEnd).toHaveBeenLastCalledWith('さようなら');
+        });
+
+        it('should surface recognition errors and report empty final text', () => {
             const { opts } = setup();
             const rec = createdRecognitions[0];
             rec.onerror!({ error: 'no-speech' });
-            expect(opts.onRecordingEnd).toHaveBeenCalled();
+            expect(opts.onRecordingEnd).toHaveBeenCalledWith('');
             expect(opts.onError).toHaveBeenCalledWith(expect.any(Error));
         });
 

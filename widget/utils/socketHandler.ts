@@ -1,4 +1,7 @@
 import { io, Socket } from "socket.io-client";
+import type { Product } from "../types";
+
+export type { Product };
 
 export interface SocketHandlerOptions {
   serverUrl: string;
@@ -7,6 +10,7 @@ export interface SocketHandlerOptions {
   onError: (message: string) => void;
   onConnect?: () => void;
   onResponseComplete?: () => void;
+  onRecommendation?: (products: Product[]) => void;
 }
 
 export interface SocketHandler {
@@ -24,7 +28,7 @@ export interface SocketHandler {
 export function initSocketHandler(
   options: SocketHandlerOptions,
 ): SocketHandler {
-  const { serverUrl, onTextChunk, onAudioChunk, onError, onConnect, onResponseComplete } = options;
+  const { serverUrl, onTextChunk, onAudioChunk, onError, onConnect, onResponseComplete, onRecommendation } = options;
 
   const socket: Socket = io(serverUrl);
 
@@ -49,6 +53,10 @@ export function initSocketHandler(
 
   socket.on("response-complete", () => {
     onResponseComplete?.();
+  });
+
+  socket.on("recommendation", (data: { products: Product[] }) => {
+    onRecommendation?.(data.products);
   });
 
   function sendUserInput(text: string, isVoiceInput: boolean, language = "ja"): void {

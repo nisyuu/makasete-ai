@@ -7,6 +7,7 @@ import {
   updateInputActions,
   showTypingIndicator,
   appendMessage,
+  appendRecommendations,
   hideLoadingOverlay,
   MessageState,
 } from "./utils/uiRenderer";
@@ -109,11 +110,18 @@ export function initChatWidget(config: WidgetConfig = {}): void {
   // --- Audio ---
   const audio: AudioHandler = initAudioHandler({
     onTranscript: (text) => {
+      // 認識途中のテキストは入力欄にプレビュー表示するだけで送信しない。
+      // （録音中はマイクボタンを出したままにするため updateInputActions は呼ばない）
       els.input.value = text;
-      sendMessage(true);
     },
-    onRecordingEnd: () => {
+    onRecordingEnd: (finalText) => {
       els.micBtn.classList.remove("recording");
+      // 発話が確定したタイミングで、一区切りのテキストとして一度だけ送信する。
+      const text = (finalText ?? "").trim();
+      if (text) {
+        els.input.value = text;
+        sendMessage(true);
+      }
     },
     language,
   });
@@ -154,6 +162,9 @@ export function initChatWidget(config: WidgetConfig = {}): void {
     },
     onResponseComplete: () => {
       els.input.focus();
+    },
+    onRecommendation: (products) => {
+      appendRecommendations(els.timeline, products);
     },
     onConnect: () => {
       console.log("[MakaseteAI] Connected");
