@@ -8,9 +8,11 @@ import {
   showTypingIndicator,
   appendMessage,
   appendRecommendations,
+  applyPrimaryColor,
   hideLoadingOverlay,
   MessageState,
 } from "./utils/uiRenderer";
+import { parseSettings } from "./utils/settings";
 
 interface WidgetConfig {
   serverUrl?: string;
@@ -252,17 +254,35 @@ export function initChatWidget(config: WidgetConfig = {}): void {
     isDragging = dragging;
   });
 
-  // --- データ準備の完了を待ってローディングを解除 ---
-  fetch(`${serverUrl}/health`)
-    .then((response) => {
-      if (response.ok) {
-        hideLoadingOverlay(els.loadingOverlay);
-      }
-    })
-    .catch((e) => {
-      console.error("[MakaseteAI] Error waiting for data:", e);
-    });
+  // --- データ準備の完了を待ち、settings シートの設定を反映してローディングを解除 ---
+  // Google Sheets の settings シート（primary_color / initial_message / chat_title）を
+  // 取得して表示に反映する。Sheets が唯一の真実であり、取得に失敗した場合や設定が
+  // 無い場合のみ config 由来のデフォルトへフォールバックする。
+  async function initializeWidget(): Promise<void> {
+    let greetingToRender = greeting;
 
-  // 初回の挨拶メッセージ
-  appendMessage(els.timeline, messageState, "makasete-server", greeting);
+    try {
+      // /health はサーバー側でデータ取得完了までブロックする
+      const healthResponse = await fetch(`${serverUrl}/health`);
+      if (!healthResponse.ok) {
+        console.warn("[MakaseteAI] Failed to verify data readiness");
+      }
+
+      const settingsResponse = await fetch(`${serverUrl}/api/settings`);
+      if (settingsResponse.ok) {
+        const settings = parseSettings(await settingsResponse.json());
+        if (settings.title) els.chatTitle.textContent = settings.title;
+        if (settings.primaryColor) applyPrimaryColor(shadow, settings.primaryColor);
+        if (settings.initialMessage) greetingToRender = settings.initialMessage;
+      }
+    } catch (e) {
+      console.error("[MakaseteAI] Error waiting for data:", e);
+    } finally {
+      // 初回の挨拶メッセージ（settings 反映後に一度だけ表示する）
+      appendMessage(els.timeline, messageState, "makasete-server", greetingToRender);
+      hideLoadingOverlay(els.loadingOverlay);
+    }
+  }
+
+  void initializeWidget();
 }
