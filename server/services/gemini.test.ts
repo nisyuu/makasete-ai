@@ -105,7 +105,7 @@ describe('Gemini service utilities', () => {
             initGemini();
 
             expect(GoogleGenerativeAI).toHaveBeenCalledWith('test-key');
-            expect(getGenerativeModel).toHaveBeenCalledWith({ model: 'gemini-2.5-flash' });
+            expect(getGenerativeModel).toHaveBeenCalledWith({ model: 'gemini-3.5-flash' });
             config.geminiApiKey = original;
         });
     });

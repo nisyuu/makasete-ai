@@ -12,8 +12,8 @@ export function initGemini() {
         return;
     }
     genAI = new GoogleGenerativeAI(config.geminiApiKey);
-    // Use gemini-2.5-flash as originally intended, non-JSON streaming mode
-    model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    // Use the latest Flash model, non-JSON streaming mode
+    model = genAI.getGenerativeModel({ model: "gemini-3.5-flash" });
 }
 
 /**
