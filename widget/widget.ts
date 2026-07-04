@@ -21,6 +21,11 @@ interface WidgetConfig {
   language?: "ja" | "en";
 }
 
+/** 音声読み上げ ON（スピーカー）アイコン */
+const ICON_AUDIO_ON = `<svg class="lucide lucide-volume-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>`;
+/** 音声読み上げ OFF（ミュート）アイコン */
+const ICON_AUDIO_OFF = `<svg class="lucide lucide-volume-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="22" x2="16" y1="9" y2="15"/><line x1="16" x2="22" y1="9" y2="15"/></svg>`;
+
 /** ウィジェットのリッチUIマークアップ（ランチャーボタン・チャットウィンドウ等） */
 function buildWidgetMarkup(placeholder: string, helperText: string): string {
   return `
@@ -29,6 +34,9 @@ function buildWidgetMarkup(placeholder: string, helperText: string): string {
         <div class="chat-header">
           <span class="chat-title"></span>
           <div class="header-controls">
+            <button class="audio-toggle-btn" aria-pressed="false">
+              ${ICON_AUDIO_OFF}
+            </button>
             <button class="close-btn" title="閉じる">
               <svg class="lucide lucide-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
             </button>
@@ -108,6 +116,24 @@ export function initChatWidget(config: WidgetConfig = {}): void {
   let isAudioEnabled = false;
   // ドラッグ操作中かどうか（ランチャーのクリック判定で使用）
   let isDragging = false;
+
+  // 音声読み上げ ON/OFF トグルボタン（ヘッダー内）
+  const audioToggleBtn = shadow.querySelector(
+    ".audio-toggle-btn",
+  ) as HTMLButtonElement;
+
+  /** トグルボタンの表示（アイコン・タイトル・aria）を現在の状態に合わせて更新する */
+  function updateAudioToggle(): void {
+    audioToggleBtn.innerHTML = isAudioEnabled ? ICON_AUDIO_ON : ICON_AUDIO_OFF;
+    audioToggleBtn.setAttribute("aria-pressed", String(isAudioEnabled));
+    audioToggleBtn.title = isAudioEnabled
+      ? isEn
+        ? "Turn voice replies off"
+        : "音声読み上げをオフにする"
+      : isEn
+        ? "Turn voice replies on"
+        : "音声読み上げをオンにする";
+  }
 
   // --- Audio ---
   const audio: AudioHandler = initAudioHandler({
@@ -221,8 +247,26 @@ export function initChatWidget(config: WidgetConfig = {}): void {
     audio.toggleRecording();
     const recording = els.micBtn.classList.toggle("recording");
     // マイク利用開始時にボットの音声出力も自動で有効化する
-    if (recording) isAudioEnabled = true;
+    if (recording) {
+      isAudioEnabled = true;
+      updateAudioToggle();
+    }
   });
+
+  // 音声読み上げの ON/OFF を手動で切り替える。
+  // OFF にしたときは再生中の音声も止める。
+  audioToggleBtn.addEventListener("click", () => {
+    isAudioEnabled = !isAudioEnabled;
+    if (isAudioEnabled) {
+      audio.resumeAudioContext().catch(console.error);
+    } else {
+      audio.resetAudioState();
+    }
+    updateAudioToggle();
+  });
+
+  // 初期表示（アイコン・タイトル）を状態に合わせて設定する
+  updateAudioToggle();
 
   els.launcherBtn.addEventListener("click", () => {
     if (isDragging) return; // ドラッグ中はトグルしない

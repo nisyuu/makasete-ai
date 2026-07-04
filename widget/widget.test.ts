@@ -63,6 +63,7 @@ function getEls() {
         input: shadow.querySelector('.text-input') as HTMLTextAreaElement,
         sendBtn: shadow.querySelector('.send-btn') as HTMLButtonElement,
         micBtn: shadow.querySelector('.mic-btn') as HTMLButtonElement,
+        audioToggleBtn: shadow.querySelector('.audio-toggle-btn') as HTMLButtonElement,
         launcherBtn: shadow.querySelector('.launcher-button') as HTMLButtonElement,
         closeBtn: shadow.querySelector('.close-btn') as HTMLButtonElement,
         loadingOverlay: shadow.querySelector('.loading-overlay') as HTMLElement,
@@ -396,6 +397,43 @@ describe('initChatWidget (rich UI)', () => {
             micBtn.click();
             expect(window.alert).toHaveBeenCalled();
             expect(audioHandler.toggleRecording).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('audio output toggle', () => {
+        it('is off by default and turning it on makes typed messages use TTS', () => {
+            initChatWidget({ language: 'ja' });
+            const { audioToggleBtn, input, sendBtn } = getEls();
+            expect(audioToggleBtn.getAttribute('aria-pressed')).toBe('false');
+
+            audioToggleBtn.click();
+            expect(audioToggleBtn.getAttribute('aria-pressed')).toBe('true');
+
+            input.value = 'hello';
+            sendBtn.click();
+            // 音声出力 ON のときはテキスト送信でも useAudio=true になる
+            expect(socketHandler.sendUserInput).toHaveBeenCalledWith('hello', true, 'ja');
+        });
+
+        it('turning it off stops current playback and reverts typed messages to text', () => {
+            initChatWidget({ language: 'ja' });
+            const { audioToggleBtn, input, sendBtn } = getEls();
+            audioToggleBtn.click(); // ON
+            audioToggleBtn.click(); // OFF
+            expect(audioToggleBtn.getAttribute('aria-pressed')).toBe('false');
+            // OFF にしたら再生中の音声を止める
+            expect(audioHandler.resetAudioState).toHaveBeenCalled();
+
+            input.value = 'hello';
+            sendBtn.click();
+            expect(socketHandler.sendUserInput).toHaveBeenCalledWith('hello', false, 'ja');
+        });
+
+        it('is enabled automatically when the mic is used', () => {
+            initChatWidget();
+            const { micBtn, audioToggleBtn } = getEls();
+            micBtn.click(); // 録音開始 → isAudioEnabled = true
+            expect(audioToggleBtn.getAttribute('aria-pressed')).toBe('true');
         });
     });
 
