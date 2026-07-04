@@ -87,7 +87,7 @@ describe('GeminiTTSService', () => {
 
         const reqBody = synthesize.mock.calls[0][0].requestBody;
         expect(reqBody.input).toEqual({ text: 'こんにちは' });
-        expect(reqBody.voice).toEqual({ languageCode: 'ja-JP', name: 'ja-JP-Neural2-D' });
+        expect(reqBody.voice).toEqual({ languageCode: 'ja-JP', name: 'ja-JP-Chirp3-HD-Charon' });
 
         const chunks: Buffer[] = [];
         for await (const c of stream) chunks.push(c as Buffer);
@@ -103,7 +103,7 @@ describe('GeminiTTSService', () => {
 
         const reqBody = synthesize.mock.calls[0][0].requestBody;
         expect(reqBody.input).toEqual({ ssml: '<speak>hi</speak>' });
-        expect(reqBody.voice).toEqual({ languageCode: 'en-US', name: 'en-US-Neural2-D' });
+        expect(reqBody.voice).toEqual({ languageCode: 'en-US', name: 'en-US-Chirp3-HD-Charon' });
     });
 
     it('should fall back to the Japanese voice for unknown languages', async () => {
