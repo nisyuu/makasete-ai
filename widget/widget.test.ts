@@ -413,6 +413,35 @@ describe('initChatWidget (rich UI)', () => {
             expect(msgs[msgs.length - 1].innerHTML).toContain('マイク');
         });
 
+        it('mic click should not mark recording or enable audio when start fails', () => {
+            // start() が失敗すると toggleRecording は false を返す
+            audioHandler.toggleRecording.mockReturnValue(false);
+            initChatWidget();
+            const { micBtn, audioToggleBtn } = getEls();
+
+            micBtn.click();
+
+            expect(audioHandler.toggleRecording).toHaveBeenCalled();
+            // 実状態が録音中でないのでボタン表示も録音中にならず、音声出力も自動有効化しない
+            expect(micBtn.classList.contains('recording')).toBe(false);
+            expect(audioToggleBtn.getAttribute('aria-pressed')).toBe('false');
+        });
+
+        it('onError should surface device and network messages', () => {
+            initChatWidget({ language: 'ja' });
+            const { timeline } = getEls();
+            const lastServerMsg = () => {
+                const msgs = timeline.querySelectorAll('.message.makasete-server');
+                return msgs[msgs.length - 1].innerHTML;
+            };
+
+            captured.audioOpts!.onError!(new Error('audio-capture'));
+            expect(lastServerMsg()).toContain('マイクが見つかりません');
+
+            captured.audioOpts!.onError!(new Error('network'));
+            expect(lastServerMsg()).toContain('ネットワーク');
+        });
+
         it('onError should stay silent for benign no-speech errors', () => {
             initChatWidget();
             const { timeline } = getEls();
