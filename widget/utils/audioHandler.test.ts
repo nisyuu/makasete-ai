@@ -186,6 +186,49 @@ describe('initAudioHandler', () => {
         });
     });
 
+    describe('recording suppresses playback (barge-in)', () => {
+        it('should stop the bot voice when recording starts', async () => {
+            const { handler } = setup();
+            // ボットが発話中
+            handler.handleAudioChunk(new ArrayBuffer(2));
+            await flush();
+            expect(createdSources).toHaveLength(1);
+
+            // 発話中にマイクを押す（録音開始）と再生中の音声を止める
+            handler.toggleRecording();
+            expect(createdSources[0].stop).toHaveBeenCalled();
+        });
+
+        it('should not play audio chunks that arrive while recording', async () => {
+            const { handler } = setup();
+            handler.toggleRecording(); // 録音開始
+            handler.handleAudioChunk(new ArrayBuffer(2));
+            await flush();
+            // 録音中はボットの発話を再生しない（マイクが自分の音声を拾わないように）
+            expect(createdSources).toHaveLength(0);
+        });
+
+        it('should abort a chunk that finishes decoding after recording starts', async () => {
+            const { handler } = setup();
+            handler.handleAudioChunk(new ArrayBuffer(2));
+            // decode の待機中（await 前）に録音を開始する
+            handler.toggleRecording();
+            await flush();
+            // decode 完了後も再生（source 生成）されない
+            expect(createdSources).toHaveLength(0);
+        });
+
+        it('should resume playing after recording stops', async () => {
+            const { handler } = setup();
+            const rec = createdRecognitions[0];
+            handler.toggleRecording(); // 録音開始
+            rec.onend!(); // 録音終了（onend で isRecording が false になる）
+            handler.handleAudioChunk(new ArrayBuffer(2));
+            await flush();
+            expect(createdSources).toHaveLength(1);
+        });
+    });
+
     describe('speech recognition', () => {
         it('should report support correctly', () => {
             const { handler } = setup();

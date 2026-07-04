@@ -76,6 +76,8 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
 
   async function playNextInQueue(): Promise<void> {
     if (isPlaying || audioQueue.length === 0) return;
+    // 録音中はボットの発話を再生しない（マイクが自分の音声を拾うのを防ぐ）
+    if (isRecording) return;
     if (!audioContext) initAudioContext();
     if (!audioContext) return;
 
@@ -88,6 +90,12 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
         const audioBuffer = await audioContext.decodeAudioData(
           rawData.slice(0),
         );
+
+        // decode の待機中に録音が開始された場合は再生を中止する
+        if (isRecording) {
+          isPlaying = false;
+          return;
+        }
 
         const source = audioContext.createBufferSource();
         source.buffer = audioBuffer;
@@ -115,6 +123,9 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
   }
 
   function handleAudioChunk(content: unknown): void {
+    // 録音中はボットの発話を再生しない（マイクが自分の音声を拾うのを防ぐ）
+    if (isRecording) return;
+
     let rawData: ArrayBuffer;
 
     if (content instanceof ArrayBuffer) {
@@ -208,6 +219,10 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
     if (isRecording) {
       recognition.stop();
     } else {
+      // 録音開始時に再生中のボット音声を止める。
+      // これにより「発話中にマイクを押すと発話が止まり、
+      // ボットの音声がテキスト化されて入力欄に入る」問題を防ぐ。
+      resetAudioState();
       finalTranscript = "";
       recognition.start();
       isRecording = true;
