@@ -77,9 +77,18 @@ describe('initChatWidget (rich UI)', () => {
         audioHandler.isSpeechRecognitionSupported.mockReturnValue(true);
         audioHandler.resumeAudioContext.mockReturnValue(Promise.resolve());
         window.alert = vi.fn();
-        // fetch(/health) はローディング解除に使われる
-        vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: true } as Response)));
+        // fetch(/health) はローディング解除、fetch(/api/settings) は設定取得に使われる。
+        // デフォルトでは設定なし（空配列）を返し、config 由来のデフォルトが使われるようにする。
+        vi.stubGlobal(
+            'fetch',
+            vi.fn(() =>
+                Promise.resolve({ ok: true, json: () => Promise.resolve([]) } as unknown as Response),
+            ),
+        );
     });
+
+    // fetch チェーン（health -> settings -> json）の解決を待つためのヘルパー
+    const flushAsync = () => new Promise((resolve) => setTimeout(resolve, 0));
 
     afterEach(() => {
         // stubGlobal(innerWidth / fetch) のテスト間汚染を防ぐ
@@ -102,8 +111,9 @@ describe('initChatWidget (rich UI)', () => {
         expect(input.placeholder).toBe('質問を入力...');
     });
 
-    it('should render the initial greeting message', () => {
+    it('should render the initial greeting message after settings load', async () => {
         initChatWidget();
+        await flushAsync();
         const { timeline } = getEls();
         const greeting = timeline.querySelector('.message.makasete-server');
         expect(greeting?.innerHTML).toContain('AIアシスタント');
@@ -155,6 +165,114 @@ describe('initChatWidget (rich UI)', () => {
 
         expect(errSpy).toHaveBeenCalledWith('[MakaseteAI] Error waiting for data:', expect.any(Error));
         errSpy.mockRestore();
+    });
+
+    describe('settings sheet reflection', () => {
+        const stubFetchWithSettings = (settings: unknown) => {
+            vi.stubGlobal(
+                'fetch',
+                vi.fn((url: string) => {
+                    if (typeof url === 'string' && url.endsWith('/api/settings')) {
+                        return Promise.resolve({
+                            ok: true,
+                            json: () => Promise.resolve(settings),
+                        } as unknown as Response);
+                    }
+                    return Promise.resolve({
+                        ok: true,
+                        json: () => Promise.resolve([]),
+                    } as unknown as Response);
+                }),
+            );
+        };
+
+        it('applies primary_color, initial_message and chat_title (key-value format)', async () => {
+            stubFetchWithSettings([
+                { key: 'primary_color', value: '#ff8800' },
+                { key: 'initial_message', value: 'カスタム挨拶です' },
+                { key: 'chat_title', value: 'サポートAI' },
+            ]);
+            initChatWidget();
+            await flushAsync();
+
+            const { shadow, chatTitle, timeline } = getEls();
+            expect((shadow.host as HTMLElement).style.getPropertyValue('--primary-color')).toBe('#ff8800');
+            expect(chatTitle.textContent).toBe('サポートAI');
+            expect(timeline.querySelector('.message.makasete-server')?.innerHTML).toContain('カスタム挨拶です');
+        });
+
+        it('applies settings provided in the single-row column format', async () => {
+            stubFetchWithSettings([
+                { primary_color: '#123456', initial_message: 'row形式の挨拶', chat_title: 'Row Bot' },
+            ]);
+            initChatWidget();
+            await flushAsync();
+
+            const { shadow, chatTitle, timeline } = getEls();
+            expect((shadow.host as HTMLElement).style.getPropertyValue('--primary-color')).toBe('#123456');
+            expect(chatTitle.textContent).toBe('Row Bot');
+            expect(timeline.querySelector('.message.makasete-server')?.innerHTML).toContain('row形式の挨拶');
+        });
+
+        it('keeps the config defaults when the settings sheet is empty', async () => {
+            stubFetchWithSettings([]);
+            initChatWidget();
+            await flushAsync();
+
+            const { shadow, chatTitle, timeline } = getEls();
+            expect(chatTitle.textContent).toBe('AIアシスタント');
+            expect(timeline.querySelector('.message.makasete-server')?.innerHTML).toContain('AIアシスタント');
+            // 設定が無い場合は --primary-color を上書きせず CSS のデフォルトを使う
+            expect((shadow.host as HTMLElement).style.getPropertyValue('--primary-color')).toBe('');
+        });
+
+        it('keeps the config defaults when the settings endpoint returns 404', async () => {
+            vi.stubGlobal(
+                'fetch',
+                vi.fn((url: string) => {
+                    if (typeof url === 'string' && url.endsWith('/api/settings')) {
+                        return Promise.resolve({
+                            ok: false,
+                            json: () => Promise.resolve({ error: 'not found' }),
+                        } as unknown as Response);
+                    }
+                    return Promise.resolve({
+                        ok: true,
+                        json: () => Promise.resolve([]),
+                    } as unknown as Response);
+                }),
+            );
+            initChatWidget();
+            await flushAsync();
+
+            const { chatTitle, timeline } = getEls();
+            expect(chatTitle.textContent).toBe('AIアシスタント');
+            expect(timeline.querySelector('.message.makasete-server')?.innerHTML).toContain('AIアシスタント');
+        });
+
+        it('warns when the health check returns a non-ok status', async () => {
+            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+            vi.stubGlobal(
+                'fetch',
+                vi.fn((url: string) => {
+                    if (typeof url === 'string' && url.endsWith('/health')) {
+                        return Promise.resolve({
+                            ok: false,
+                            json: () => Promise.resolve([]),
+                        } as unknown as Response);
+                    }
+                    return Promise.resolve({
+                        ok: true,
+                        json: () => Promise.resolve([]),
+                    } as unknown as Response);
+                }),
+            );
+            initChatWidget();
+            await flushAsync();
+
+            expect(warnSpy).toHaveBeenCalledWith('[MakaseteAI] Failed to verify data readiness');
+            warnSpy.mockRestore();
+        });
     });
 
     it('should ignore empty sends', () => {
