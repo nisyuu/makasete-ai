@@ -254,6 +254,29 @@ describe('initAudioHandler', () => {
             expect(rec.stop).toHaveBeenCalled();
         });
 
+        it('should return the resulting recording state on toggle', () => {
+            const { handler } = setup();
+            // 開始時は true、停止リクエスト時は false を返す
+            expect(handler.toggleRecording()).toBe(true);
+            expect(handler.toggleRecording()).toBe(false);
+        });
+
+        it('should not enter recording state and should report an error when start throws', () => {
+            const { handler, opts } = setup();
+            const rec = createdRecognitions[0];
+            rec.start.mockImplementationOnce(() => {
+                throw new Error('InvalidStateError');
+            });
+
+            // start が失敗したら録音状態にならず false を返す
+            expect(handler.toggleRecording()).toBe(false);
+            expect(opts.onError).toHaveBeenCalledWith(expect.any(Error));
+
+            // 状態がずれていないので、次の toggle で再度 start を試みられる
+            expect(handler.toggleRecording()).toBe(true);
+            expect(rec.start).toHaveBeenCalledTimes(2);
+        });
+
         it('should preview interim results without sending, then deliver the final text once on end', () => {
             const { opts } = setup();
             const rec = createdRecognitions[0];

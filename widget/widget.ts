@@ -151,6 +151,39 @@ export function initChatWidget(config: WidgetConfig = {}): void {
         sendMessage(true);
       }
     },
+    onError: (error) => {
+      // 音声認識のエラーをユーザーに通知する。
+      // no-speech / aborted は通常操作の範囲なので通知しない。
+      const code = error.message;
+      if (code === "no-speech" || code === "aborted") return;
+
+      let message: string;
+      switch (code) {
+        case "not-allowed":
+        case "service-not-allowed":
+          message = isEn
+            ? "Microphone access is blocked. Please allow it in your browser settings."
+            : "マイクの使用が許可されていません。ブラウザの設定をご確認ください。";
+          break;
+        case "audio-capture":
+          message = isEn
+            ? "No microphone was found. Please check your device."
+            : "マイクが見つかりませんでした。デバイスをご確認ください。";
+          break;
+        case "network":
+          message = isEn
+            ? "A network error occurred during speech recognition."
+            : "音声認識中にネットワークエラーが発生しました。";
+          break;
+        default:
+          message = isEn
+            ? "Speech recognition failed. Please try again."
+            : "音声認識でエラーが発生しました。もう一度お試しください。";
+      }
+      // 録音表示が残らないように解除してからメッセージを表示する
+      els.micBtn.classList.remove("recording");
+      appendMessage(els.timeline, messageState, "makasete-server", message);
+    },
     language,
   });
 
@@ -244,8 +277,10 @@ export function initChatWidget(config: WidgetConfig = {}): void {
     }
     audio.resumeAudioContext().catch(console.error);
     audio.initAudioContext();
-    audio.toggleRecording();
-    const recording = els.micBtn.classList.toggle("recording");
+    // 実際の録音状態に合わせてボタン表示を更新する
+    // （start() が失敗した場合に表示だけ録音中になるのを防ぐ）
+    const recording = audio.toggleRecording();
+    els.micBtn.classList.toggle("recording", recording);
     // マイク利用開始時にボットの音声出力も自動で有効化する
     if (recording) {
       isAudioEnabled = true;

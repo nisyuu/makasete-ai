@@ -12,6 +12,7 @@ interface CapturedSocketOpts {
 interface CapturedAudioOpts {
     onTranscript: (text: string) => void;
     onRecordingEnd: (finalText: string) => void;
+    onError?: (error: Error) => void;
     language?: string;
 }
 
@@ -76,6 +77,7 @@ describe('initChatWidget (rich UI)', () => {
         document.body.style.overflow = '';
         vi.clearAllMocks();
         audioHandler.isSpeechRecognitionSupported.mockReturnValue(true);
+        audioHandler.toggleRecording.mockReturnValue(true);
         audioHandler.resumeAudioContext.mockReturnValue(Promise.resolve());
         window.alert = vi.fn();
         // fetch(/health) はローディング解除、fetch(/api/settings) は設定取得に使われる。
@@ -397,6 +399,35 @@ describe('initChatWidget (rich UI)', () => {
             micBtn.click();
             expect(window.alert).toHaveBeenCalled();
             expect(audioHandler.toggleRecording).not.toHaveBeenCalled();
+        });
+
+        it('onError should surface a permission message and clear the recording indicator', () => {
+            initChatWidget({ language: 'ja' });
+            const { micBtn, timeline } = getEls();
+            micBtn.classList.add('recording');
+
+            captured.audioOpts!.onError!(new Error('not-allowed'));
+
+            expect(micBtn.classList.contains('recording')).toBe(false);
+            const msgs = timeline.querySelectorAll('.message.makasete-server');
+            expect(msgs[msgs.length - 1].innerHTML).toContain('マイク');
+        });
+
+        it('onError should stay silent for benign no-speech errors', () => {
+            initChatWidget();
+            const { timeline } = getEls();
+            const before = timeline.querySelectorAll('.message.makasete-server').length;
+            captured.audioOpts!.onError!(new Error('no-speech'));
+            const after = timeline.querySelectorAll('.message.makasete-server').length;
+            expect(after).toBe(before);
+        });
+
+        it('onError should show a generic English message for unknown errors', () => {
+            initChatWidget({ language: 'en' });
+            const { timeline } = getEls();
+            captured.audioOpts!.onError!(new Error('some-unknown-error'));
+            const msgs = timeline.querySelectorAll('.message.makasete-server');
+            expect(msgs[msgs.length - 1].innerHTML.toLowerCase()).toContain('speech recognition');
         });
     });
 
