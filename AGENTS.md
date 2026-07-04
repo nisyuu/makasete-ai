@@ -12,7 +12,7 @@ This document defines the shared rules and standards for all AI agents interacti
 
 -   **Runtime**: Node.js v24 (LTS)
 -   **Package Manager**: `pnpm` (v10+) - `npm` や `yarn` は使用禁止。
--   **Main LLM**: Google Gemini API (`gemini-2.5-flash`)
+-   **Main LLM**: Google Gemini API (`gemini-3.5-flash`)
 -   **Autonomous Agent**: LangGraph + Claude 4.6 Sonnet
 -   **Frontend**: Vanilla TypeScript + Vite (No Heavy Frameworks like React/Vue in the widget itself)
 -   **Backend**: Express + Socket.io + LangChain/LangGraph

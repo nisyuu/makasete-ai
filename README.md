@@ -28,7 +28,7 @@ ECサイトやサービスサイトに簡単導入でき、音声とテキスト
 
 - **技術スタック**: Node.js (v24), Express, Socket.io, **LangChain (LangGraph)**
 - **AI処理**:
-  - **LLM**: Google Gemini API (gemini-2.5-flash)
+  - **LLM**: Google Gemini API (gemini-3.5-flash)
   - **オーケストレーション**: LangChain / LangGraph によるエージェント構成
   - **TTS**: Google Cloud Text-to-Speech (デフォルト) または ElevenLabs API
 - **データ連携**: Google Sheets API (商品情報・FAQ・サービス紹介・システムプロンプトの取得)
