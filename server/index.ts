@@ -52,6 +52,12 @@ const io = new Server(httpServer, {
     origin: allowedOrigins,
     methods: ["GET", "POST"],
   },
+  // Firebase App Hosting (Cloud Run 前段のプロキシ) は末尾スラッシュを除去して
+  // リクエストを転送するため、既定の `/socket.io/` では engine.io がパスを
+  // 認識できず 404 になる。`addTrailingSlash: false` で `/socket.io`（末尾
+  // スラッシュ無し）も受け付けるようにし、どちらの形式でもハンドシェイクを
+  // 成立させる。
+  addTrailingSlash: false,
 });
 
 // Security: Simple Socket.io rate limiting

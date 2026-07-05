@@ -30,7 +30,10 @@ export function initSocketHandler(
 ): SocketHandler {
   const { serverUrl, onTextChunk, onAudioChunk, onError, onConnect, onResponseComplete, onRecommendation } = options;
 
-  const socket: Socket = io(serverUrl);
+  // Firebase App Hosting などのプロキシは既定の `/socket.io/` から末尾スラッシュを
+  // 除去して転送し、サーバ側でパスが一致せず 404 になることがある。クライアント側でも
+  // 末尾スラッシュを付けずに接続し、サーバの設定と揃える。
+  const socket: Socket = io(serverUrl, { addTrailingSlash: false });
 
   socket.on("connect", () => {
     onConnect?.();
