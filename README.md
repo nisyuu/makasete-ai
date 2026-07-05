@@ -111,6 +111,19 @@ ECサイトの `</body>` タグの直前に以下のスクリプトを追加し�
 <script src="https://[YOUR_CLOUD_RUN_URL]/public/widget.js"></script>
 ```
 
+ウィジェットは既定で **スクリプトの読み込み元（= Cloud Run の URL）** に接続します。埋め込み先サイトのドメインには接続しないため、上記のタグを追加するだけで動作します。
+
+接続先を明示的に指定したい場合は `data-server-url` 属性を使用してください。
+
+```html
+<script
+  src="https://[YOUR_CLOUD_RUN_URL]/public/widget.js"
+  data-server-url="https://[YOUR_CLOUD_RUN_URL]"
+></script>
+```
+
+> **注意**: 埋め込み先サイトからの接続はクロスオリジンになるため、サーバー側の環境変数 `ALLOWED_ORIGINS` に埋め込み先サイトの origin（例: `https://example.com`）を含める必要があります。
+
 ## スプレッドシートの構成
 
 本システムは、指定された `GOOGLE_SHEETS_ID` のスプレッドシートから以下のシートを参照します。各シートの1行目はヘッダーとして扱われます。**カラム名や数は自由に追加・変更が可能**です（AIが自動的に読み込みます）。

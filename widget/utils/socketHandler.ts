@@ -33,7 +33,24 @@ export function initSocketHandler(
   // Firebase App Hosting などのプロキシは既定の `/socket.io/` から末尾スラッシュを
   // 除去して転送し、サーバ側でパスが一致せず 404 になることがある。クライアント側でも
   // 末尾スラッシュを付けずに接続し、サーバの設定と揃える。
-  const socket: Socket = io(serverUrl, { addTrailingSlash: false });
+  const socket: Socket = io(serverUrl, {
+    addTrailingSlash: false,
+    // 接続先が恒久的に 404 を返す場合（誤設定など）に無限リトライで
+    // リクエストを流し続けないよう、試行回数に上限を設ける。
+    // 初回リトライは 1 秒で一時切断からの低遅延復帰を維持しつつ、
+    // 指数バックオフで最大 30 秒まで間隔を広げる（計 ~10 回 / ~3 分）。
+    reconnectionAttempts: 10,
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 30000,
+  });
+
+  socket.io.on("reconnect_failed", () => {
+    // ウィジェットを開いていないページでも動作するため、チャット欄への
+    // エラー表示はせず console 警告に留める。
+    console.warn(
+      "[MakaseteAI] サーバーに接続できないため自動再接続を停止しました",
+    );
+  });
 
   socket.on("connect", () => {
     onConnect?.();
@@ -63,6 +80,10 @@ export function initSocketHandler(
   });
 
   function sendUserInput(text: string, isVoiceInput: boolean, language = "ja"): void {
+    // リトライ上限到達後もユーザー操作を契機に接続を復帰できるようにする
+    if (!socket.connected) {
+      socket.connect();
+    }
     socket.emit("user-input", { text, isVoiceInput, language });
   }
 

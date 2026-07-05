@@ -13,6 +13,7 @@ import {
   MessageState,
 } from "./utils/uiRenderer";
 import { parseSettings } from "./utils/settings";
+import { resolveServerUrl } from "./utils/serverUrl";
 
 interface WidgetConfig {
   serverUrl?: string;
@@ -78,7 +79,7 @@ function buildWidgetMarkup(placeholder: string, helperText: string): string {
 
 export function initChatWidget(config: WidgetConfig = {}): void {
   const {
-    serverUrl = window.location.origin,
+    serverUrl = resolveServerUrl(),
     title = "AIアシスタント",
     placeholder = "質問を入力...",
     language = "ja",
