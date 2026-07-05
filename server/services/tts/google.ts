@@ -38,12 +38,16 @@ export class GeminiTTSService implements TTSService {
 
     // Chirp 3: HD voices — the latest high-fidelity generation, suitable for
     // low-latency real-time synthesis. Voice names are shared across locales
-    // in the <locale>-Chirp3-HD-<voice> format. "Kore" is a calm, composed
+    // in the <locale>-Chirp3-HD-<voice> format. "Aoede" is a bright, friendly
     // voice that fits customer-support / help-desk / FAQ use cases.
     private static readonly VOICES: Record<string, texttospeech_v1.Schema$VoiceSelectionParams> = {
-        ja: { languageCode: 'ja-JP', name: 'ja-JP-Chirp3-HD-Kore' },
-        en: { languageCode: 'en-US', name: 'en-US-Chirp3-HD-Kore' },
+        ja: { languageCode: 'ja-JP', name: 'ja-JP-Chirp3-HD-Aoede' },
+        en: { languageCode: 'en-US', name: 'en-US-Chirp3-HD-Aoede' },
     };
+
+    // Slightly faster-than-normal pace for a snappier response feel. Chirp 3: HD
+    // voices support speakingRate in the 0.25–2.0 range (1.0 = normal speed).
+    private static readonly SPEAKING_RATE = 1.15;
 
     public async generateSpeechStream(text: string, language = 'ja'): Promise<Readable> {
         const client = await this.getClient();
@@ -56,10 +60,11 @@ export class GeminiTTSService implements TTSService {
                     requestBody: {
                         input: isSsml ? { ssml: text } : { text },
                         voice,
-                        // Note: Chirp 3 HD voices do not support the speakingRate
-                        // (or pitch) parameter, so it is intentionally omitted.
+                        // Note: Chirp 3 HD voices support speakingRate but not
+                        // pitch, so only the rate is set here.
                         audioConfig: {
                             audioEncoding: 'MP3',
+                            speakingRate: GeminiTTSService.SPEAKING_RATE,
                         },
                     }
                 }, (err, res) => {
