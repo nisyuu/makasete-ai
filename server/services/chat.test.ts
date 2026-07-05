@@ -175,6 +175,41 @@ describe('ChatService', () => {
             expect(audioEmits).toHaveLength(2);
         });
 
+        it('should emit a multi-chunk TTS stream as a single concatenated audio chunk', async () => {
+            // MP3 must not be split at arbitrary byte boundaries, so a sentence
+            // whose TTS stream arrives in several parts must be emitted as one
+            // complete MP3 rather than one audio-chunk per stream part.
+            generateResponseStream.mockResolvedValue(makeStream(['やあ。']));
+            generateSpeechStream.mockResolvedValue(
+                Readable.from([Buffer.from('AU'), Buffer.from('DI'), Buffer.from('O')]),
+            );
+            const socket = makeSocket();
+            const svc = new ChatService();
+
+            await svc.handleUserInput(socket as never, { text: 'hi', isVoiceInput: true });
+
+            const audioEmits = socket.emit.mock.calls.filter(
+                (c) => c[0] === 'audio-chunk' && c[1].type === 'audio',
+            );
+            // 断片ごとではなく1文=1チャンクで送信される
+            expect(audioEmits).toHaveLength(1);
+            expect((audioEmits[0][1].content as Buffer).toString()).toBe('AUDIO');
+        });
+
+        it('should not emit an audio chunk for an empty TTS stream', async () => {
+            generateResponseStream.mockResolvedValue(makeStream(['やあ。']));
+            generateSpeechStream.mockResolvedValue(Readable.from([]));
+            const socket = makeSocket();
+            const svc = new ChatService();
+
+            await svc.handleUserInput(socket as never, { text: 'hi', isVoiceInput: true });
+
+            const audioEmits = socket.emit.mock.calls.filter(
+                (c) => c[0] === 'audio-chunk' && c[1].type === 'audio',
+            );
+            expect(audioEmits).toHaveLength(0);
+        });
+
         it('should apply SSML pause breaks for Google TTS', async () => {
             getTTSService.mockReturnValueOnce({ generateSpeechStream, getName: () => 'gemini-tts' });
             generateResponseStream.mockResolvedValue(makeStream(['やあ。']));
