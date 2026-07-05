@@ -12,9 +12,6 @@ import {
 } from "../utils/text";
 import { getRecommendations } from "./recommendations";
 
-// Minimum audio chunk size for reliable MP3 decoding in browsers (~0.25s at 128kbps)
-const MIN_AUDIO_CHUNK_BYTES = 4 * 1024;
-
 export class ChatService {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private chatHistory: any[] = [];
@@ -150,8 +147,15 @@ export class ChatService {
     }
   }
 
-  // Resumes a paused audio stream and forwards its data to the socket in
-  // minimum-size chunks for reliable MP3 decoding on the client.
+  // Resumes a paused audio stream, buffers it in full, and forwards the whole
+  // sentence's audio to the socket as a single "audio-chunk".
+  //
+  // The audio is MP3, which cannot be split at arbitrary byte boundaries: MP3's
+  // bit reservoir stores a frame's high-frequency data in preceding frames, so
+  // decoding a mid-stream byte slice on its own loses those highs and sounds
+  // muffled (plus clicks/gaps at frame-desynced boundaries). The client decodes
+  // each "audio-chunk" as a self-contained MP3 via decodeAudioData, so we must
+  // send one complete MP3 per sentence rather than partial slices.
   private async drainStreamToSocket(
     socket: Socket,
     streamPromise: Promise<NodeJS.ReadableStream | null>,
@@ -160,19 +164,18 @@ export class ChatService {
     if (!audioStream) return;
 
     await new Promise<void>((resolve) => {
-      let pending = Buffer.alloc(0);
+      const chunks: Buffer[] = [];
 
       audioStream.on("data", (chunk: Buffer) => {
-        pending = Buffer.concat([pending, chunk]);
-        if (pending.length >= MIN_AUDIO_CHUNK_BYTES) {
-          socket.emit("audio-chunk", { type: "audio", content: pending });
-          pending = Buffer.alloc(0);
-        }
+        chunks.push(chunk);
       });
 
       audioStream.on("end", () => {
-        if (pending.length > 0) {
-          socket.emit("audio-chunk", { type: "audio", content: pending });
+        if (chunks.length > 0) {
+          const full = Buffer.concat(chunks);
+          if (full.length > 0) {
+            socket.emit("audio-chunk", { type: "audio", content: full });
+          }
         }
         resolve();
       });
