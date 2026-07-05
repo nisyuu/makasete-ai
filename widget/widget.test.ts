@@ -12,6 +12,7 @@ interface CapturedSocketOpts {
 interface CapturedAudioOpts {
     onTranscript: (text: string) => void;
     onRecordingEnd: (finalText: string) => void;
+    onError?: (error: Error) => void;
     language?: string;
 }
 
@@ -63,6 +64,7 @@ function getEls() {
         input: shadow.querySelector('.text-input') as HTMLTextAreaElement,
         sendBtn: shadow.querySelector('.send-btn') as HTMLButtonElement,
         micBtn: shadow.querySelector('.mic-btn') as HTMLButtonElement,
+        audioToggleBtn: shadow.querySelector('.audio-toggle-btn') as HTMLButtonElement,
         launcherBtn: shadow.querySelector('.launcher-button') as HTMLButtonElement,
         closeBtn: shadow.querySelector('.close-btn') as HTMLButtonElement,
         loadingOverlay: shadow.querySelector('.loading-overlay') as HTMLElement,
@@ -75,6 +77,7 @@ describe('initChatWidget (rich UI)', () => {
         document.body.style.overflow = '';
         vi.clearAllMocks();
         audioHandler.isSpeechRecognitionSupported.mockReturnValue(true);
+        audioHandler.toggleRecording.mockReturnValue(true);
         audioHandler.resumeAudioContext.mockReturnValue(Promise.resolve());
         window.alert = vi.fn();
         // fetch(/health) はローディング解除、fetch(/api/settings) は設定取得に使われる。
@@ -396,6 +399,101 @@ describe('initChatWidget (rich UI)', () => {
             micBtn.click();
             expect(window.alert).toHaveBeenCalled();
             expect(audioHandler.toggleRecording).not.toHaveBeenCalled();
+        });
+
+        it('onError should surface a permission message and clear the recording indicator', () => {
+            initChatWidget({ language: 'ja' });
+            const { micBtn, timeline } = getEls();
+            micBtn.classList.add('recording');
+
+            captured.audioOpts!.onError!(new Error('not-allowed'));
+
+            expect(micBtn.classList.contains('recording')).toBe(false);
+            const msgs = timeline.querySelectorAll('.message.makasete-server');
+            expect(msgs[msgs.length - 1].innerHTML).toContain('マイク');
+        });
+
+        it('mic click should not mark recording or enable audio when start fails', () => {
+            // start() が失敗すると toggleRecording は false を返す
+            audioHandler.toggleRecording.mockReturnValue(false);
+            initChatWidget();
+            const { micBtn, audioToggleBtn } = getEls();
+
+            micBtn.click();
+
+            expect(audioHandler.toggleRecording).toHaveBeenCalled();
+            // 実状態が録音中でないのでボタン表示も録音中にならず、音声出力も自動有効化しない
+            expect(micBtn.classList.contains('recording')).toBe(false);
+            expect(audioToggleBtn.getAttribute('aria-pressed')).toBe('false');
+        });
+
+        it('onError should surface device and network messages', () => {
+            initChatWidget({ language: 'ja' });
+            const { timeline } = getEls();
+            const lastServerMsg = () => {
+                const msgs = timeline.querySelectorAll('.message.makasete-server');
+                return msgs[msgs.length - 1].innerHTML;
+            };
+
+            captured.audioOpts!.onError!(new Error('audio-capture'));
+            expect(lastServerMsg()).toContain('マイクが見つかりません');
+
+            captured.audioOpts!.onError!(new Error('network'));
+            expect(lastServerMsg()).toContain('ネットワーク');
+        });
+
+        it('onError should stay silent for benign no-speech errors', () => {
+            initChatWidget();
+            const { timeline } = getEls();
+            const before = timeline.querySelectorAll('.message.makasete-server').length;
+            captured.audioOpts!.onError!(new Error('no-speech'));
+            const after = timeline.querySelectorAll('.message.makasete-server').length;
+            expect(after).toBe(before);
+        });
+
+        it('onError should show a generic English message for unknown errors', () => {
+            initChatWidget({ language: 'en' });
+            const { timeline } = getEls();
+            captured.audioOpts!.onError!(new Error('some-unknown-error'));
+            const msgs = timeline.querySelectorAll('.message.makasete-server');
+            expect(msgs[msgs.length - 1].innerHTML.toLowerCase()).toContain('speech recognition');
+        });
+    });
+
+    describe('audio output toggle', () => {
+        it('is off by default and turning it on makes typed messages use TTS', () => {
+            initChatWidget({ language: 'ja' });
+            const { audioToggleBtn, input, sendBtn } = getEls();
+            expect(audioToggleBtn.getAttribute('aria-pressed')).toBe('false');
+
+            audioToggleBtn.click();
+            expect(audioToggleBtn.getAttribute('aria-pressed')).toBe('true');
+
+            input.value = 'hello';
+            sendBtn.click();
+            // 音声出力 ON のときはテキスト送信でも useAudio=true になる
+            expect(socketHandler.sendUserInput).toHaveBeenCalledWith('hello', true, 'ja');
+        });
+
+        it('turning it off stops current playback and reverts typed messages to text', () => {
+            initChatWidget({ language: 'ja' });
+            const { audioToggleBtn, input, sendBtn } = getEls();
+            audioToggleBtn.click(); // ON
+            audioToggleBtn.click(); // OFF
+            expect(audioToggleBtn.getAttribute('aria-pressed')).toBe('false');
+            // OFF にしたら再生中の音声を止める
+            expect(audioHandler.resetAudioState).toHaveBeenCalled();
+
+            input.value = 'hello';
+            sendBtn.click();
+            expect(socketHandler.sendUserInput).toHaveBeenCalledWith('hello', false, 'ja');
+        });
+
+        it('is enabled automatically when the mic is used', () => {
+            initChatWidget();
+            const { micBtn, audioToggleBtn } = getEls();
+            micBtn.click(); // 録音開始 → isAudioEnabled = true
+            expect(audioToggleBtn.getAttribute('aria-pressed')).toBe('true');
         });
     });
 
