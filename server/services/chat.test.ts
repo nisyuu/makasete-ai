@@ -1,17 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Readable } from 'stream';
 
-const { getAllSheetData, generateResponseStream, generateSpeechStream, getTTSService } = vi.hoisted(() => {
+const { getAllSheetData, getInternalSheetData, generateResponseStream, generateSpeechStream, getTTSService } = vi.hoisted(() => {
     const generateSpeechStream = vi.fn();
     return {
         getAllSheetData: vi.fn(),
+        getInternalSheetData: vi.fn(),
         generateResponseStream: vi.fn(),
         generateSpeechStream,
         getTTSService: vi.fn(() => ({ generateSpeechStream, getName: (): string => 'mock' })),
     };
 });
 
-vi.mock('./sheets', () => ({ getAllSheetData }));
+vi.mock('./sheets', () => ({ getAllSheetData, getInternalSheetData }));
 vi.mock('./gemini', () => ({ generateResponseStream }));
 vi.mock('./tts/factory', () => ({ getTTSService }));
 
@@ -38,6 +39,8 @@ describe('ChatService', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         getAllSheetData.mockReturnValue(new Map());
+        // settings シート未設定時はカード表示が有効（既定値）になる
+        getInternalSheetData.mockReturnValue(new Map());
         // 各呼び出しで新しいストリームを返す（消費済みストリームの再利用を防ぐ）
         generateSpeechStream.mockImplementation(() => Promise.resolve(Readable.from([Buffer.from('A')])));
     });
@@ -272,6 +275,38 @@ describe('ChatService', () => {
 
             const rec = socket.emit.mock.calls.find((c) => c[0] === 'recommendation');
             expect(rec).toBeUndefined();
+        });
+
+        it('should not emit recommendations when the settings sheet disables cards', async () => {
+            getAllSheetData.mockReturnValue(productSheet);
+            getInternalSheetData.mockReturnValue(new Map([
+                ['settings', [{ key: 'show_product_cards', value: 'off' }]],
+            ]));
+            // AI が商品名に言及する（本来ならカードが出る）ケースでも出さない
+            generateResponseStream.mockResolvedValue(makeStream(['おすすめはブレンドコーヒーです。']));
+            const socket = makeSocket();
+            const svc = new ChatService();
+
+            await svc.handleUserInput(socket as never, { text: '何かおすすめはありますか', isVoiceInput: false });
+
+            const rec = socket.emit.mock.calls.find((c) => c[0] === 'recommendation');
+            expect(rec).toBeUndefined();
+            expect(socket.emit).toHaveBeenCalledWith('response-complete');
+        });
+
+        it('should emit recommendations when the settings sheet enables cards', async () => {
+            getAllSheetData.mockReturnValue(productSheet);
+            getInternalSheetData.mockReturnValue(new Map([
+                ['settings', [{ key: 'show_product_cards', value: 'on' }]],
+            ]));
+            generateResponseStream.mockResolvedValue(makeStream(['おすすめはブレンドコーヒーです。']));
+            const socket = makeSocket();
+            const svc = new ChatService();
+
+            await svc.handleUserInput(socket as never, { text: '何かおすすめはありますか', isVoiceInput: false });
+
+            const rec = socket.emit.mock.calls.find((c) => c[0] === 'recommendation');
+            expect(rec).toBeTruthy();
         });
     });
 

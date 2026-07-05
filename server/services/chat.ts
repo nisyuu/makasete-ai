@@ -11,6 +11,7 @@ import {
   removeMarkdownLinks,
 } from "../utils/text";
 import { getRecommendations } from "./recommendations";
+import { isProductCardsEnabled } from "./settings";
 
 export class ChatService {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -111,13 +112,16 @@ export class ChatService {
         parts: [{ text: fullResponseText }],
       });
 
-      // Pass the assistant's answer so cards track what was actually
-      // recommended, not just keyword overlap with the user's message.
-      const recommendations = getRecommendations(text, allData, {
-        responseText: fullResponseText,
-      });
-      if (recommendations.length > 0) {
-        socket.emit("recommendation", { products: recommendations });
+      // Card display can be turned off from the spreadsheet's settings sheet.
+      if (isProductCardsEnabled()) {
+        // Pass the assistant's answer so cards track what was actually
+        // recommended, not just keyword overlap with the user's message.
+        const recommendations = getRecommendations(text, allData, {
+          responseText: fullResponseText,
+        });
+        if (recommendations.length > 0) {
+          socket.emit("recommendation", { products: recommendations });
+        }
       }
 
       socket.emit("response-complete");
