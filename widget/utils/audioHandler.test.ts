@@ -186,6 +186,49 @@ describe('initAudioHandler', () => {
         });
     });
 
+    describe('recording suppresses playback (barge-in)', () => {
+        it('should stop the bot voice when recording starts', async () => {
+            const { handler } = setup();
+            // ボットが発話中
+            handler.handleAudioChunk(new ArrayBuffer(2));
+            await flush();
+            expect(createdSources).toHaveLength(1);
+
+            // 発話中にマイクを押す（録音開始）と再生中の音声を止める
+            handler.toggleRecording();
+            expect(createdSources[0].stop).toHaveBeenCalled();
+        });
+
+        it('should not play audio chunks that arrive while recording', async () => {
+            const { handler } = setup();
+            handler.toggleRecording(); // 録音開始
+            handler.handleAudioChunk(new ArrayBuffer(2));
+            await flush();
+            // 録音中はボットの発話を再生しない（マイクが自分の音声を拾わないように）
+            expect(createdSources).toHaveLength(0);
+        });
+
+        it('should abort a chunk that finishes decoding after recording starts', async () => {
+            const { handler } = setup();
+            handler.handleAudioChunk(new ArrayBuffer(2));
+            // decode の待機中（await 前）に録音を開始する
+            handler.toggleRecording();
+            await flush();
+            // decode 完了後も再生（source 生成）されない
+            expect(createdSources).toHaveLength(0);
+        });
+
+        it('should resume playing after recording stops', async () => {
+            const { handler } = setup();
+            const rec = createdRecognitions[0];
+            handler.toggleRecording(); // 録音開始
+            rec.onend!(); // 録音終了（onend で isRecording が false になる）
+            handler.handleAudioChunk(new ArrayBuffer(2));
+            await flush();
+            expect(createdSources).toHaveLength(1);
+        });
+    });
+
     describe('speech recognition', () => {
         it('should report support correctly', () => {
             const { handler } = setup();
@@ -209,6 +252,29 @@ describe('initAudioHandler', () => {
             expect(rec.start).toHaveBeenCalled();
             handler.toggleRecording();
             expect(rec.stop).toHaveBeenCalled();
+        });
+
+        it('should return the resulting recording state on toggle', () => {
+            const { handler } = setup();
+            // 開始時は true、停止リクエスト時は false を返す
+            expect(handler.toggleRecording()).toBe(true);
+            expect(handler.toggleRecording()).toBe(false);
+        });
+
+        it('should not enter recording state and should report an error when start throws', () => {
+            const { handler, opts } = setup();
+            const rec = createdRecognitions[0];
+            rec.start.mockImplementationOnce(() => {
+                throw new Error('InvalidStateError');
+            });
+
+            // start が失敗したら録音状態にならず false を返す
+            expect(handler.toggleRecording()).toBe(false);
+            expect(opts.onError).toHaveBeenCalledWith(expect.any(Error));
+
+            // 状態がずれていないので、次の toggle で再度 start を試みられる
+            expect(handler.toggleRecording()).toBe(true);
+            expect(rec.start).toHaveBeenCalledTimes(2);
         });
 
         it('should preview interim results without sending, then deliver the final text once on end', () => {

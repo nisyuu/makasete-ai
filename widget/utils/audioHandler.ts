@@ -21,8 +21,8 @@ export interface AudioHandler {
   resumeAudioContext: () => Promise<void>;
   /** 再生中の音声を停止してキューをクリアする */
   resetAudioState: () => void;
-  /** 音声認識を開始/停止トグルする */
-  toggleRecording: () => void;
+  /** 音声認識を開始/停止トグルする。トグル後に録音中なら true を返す。 */
+  toggleRecording: () => boolean;
   /** 音声認識が利用可能かどうか */
   isSpeechRecognitionSupported: () => boolean;
   /** リソースを解放する */
@@ -76,6 +76,8 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
 
   async function playNextInQueue(): Promise<void> {
     if (isPlaying || audioQueue.length === 0) return;
+    // 録音中はボットの発話を再生しない（マイクが自分の音声を拾うのを防ぐ）
+    if (isRecording) return;
     if (!audioContext) initAudioContext();
     if (!audioContext) return;
 
@@ -88,6 +90,12 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
         const audioBuffer = await audioContext.decodeAudioData(
           rawData.slice(0),
         );
+
+        // decode の待機中に録音が開始された場合は再生を中止する
+        if (isRecording) {
+          isPlaying = false;
+          return;
+        }
 
         const source = audioContext.createBufferSource();
         source.buffer = audioBuffer;
@@ -115,6 +123,9 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
   }
 
   function handleAudioChunk(content: unknown): void {
+    // 録音中はボットの発話を再生しない（マイクが自分の音声を拾うのを防ぐ）
+    if (isRecording) return;
+
     let rawData: ArrayBuffer;
 
     if (content instanceof ArrayBuffer) {
@@ -202,16 +213,31 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
     };
   }
 
-  function toggleRecording(): void {
-    if (!recognition) return;
+  function toggleRecording(): boolean {
+    if (!recognition) return false;
 
     if (isRecording) {
+      // 停止をリクエストする。isRecording は onend で false になる。
       recognition.stop();
-    } else {
-      finalTranscript = "";
-      recognition.start();
-      isRecording = true;
+      return false;
     }
+
+    // 録音開始時に再生中のボット音声を止める。
+    // これにより「発話中にマイクを押すと発話が止まり、
+    // ボットの音声がテキスト化されて入力欄に入る」問題を防ぐ。
+    resetAudioState();
+    finalTranscript = "";
+    try {
+      recognition.start();
+    } catch (e) {
+      // すでに開始済み等で start() が失敗した場合は録音状態にしない。
+      // （ボタン表示と実状態がずれるのを防ぐ）
+      isRecording = false;
+      onError?.(e instanceof Error ? e : new Error(String(e)));
+      return false;
+    }
+    isRecording = true;
+    return true;
   }
 
   function isSpeechRecognitionSupported(): boolean {

@@ -206,6 +206,162 @@ describe('ChatService', () => {
         });
     });
 
+    describe('cancellation (barge-in)', () => {
+        const tick = () => new Promise((r) => setTimeout(r, 0));
+
+        it('supersedes an in-flight response when a newer input arrives', async () => {
+            const socket = makeSocket();
+            const svc = new ChatService();
+
+            let releaseFirst!: () => void;
+            const firstGate = new Promise<void>((r) => {
+                releaseFirst = r;
+            });
+
+            generateResponseStream.mockReset();
+            generateResponseStream
+                .mockImplementationOnce(async () =>
+                    (async function* () {
+                        yield { text: () => '最初の文。' };
+                        await firstGate; // 2つ目の入力が割り込むまで停止
+                        yield { text: () => '割り込み後の文。' };
+                    })(),
+                )
+                .mockImplementationOnce(async () => makeStream(['新しい応答。']));
+
+            const p1 = svc.handleUserInput(socket as never, { text: 'first', isVoiceInput: false });
+            await tick(); // 1つ目が最初の文を処理して停止するまで待つ
+            const p2 = svc.handleUserInput(socket as never, { text: 'second', isVoiceInput: false });
+            releaseFirst();
+            await Promise.all([p1, p2]);
+
+            // 割り込まれた1つ目は完了イベントを出さず、2つ目のみ完了する
+            const completes = socket.emit.mock.calls.filter((c) => c[0] === 'response-complete');
+            expect(completes).toHaveLength(1);
+            // 割り込み後のチャンクは送信されない
+            const staleChunk = socket.emit.mock.calls.find(
+                (c) => c[0] === 'text-chunk' && c[1].content === '割り込み後の文。',
+            );
+            expect(staleChunk).toBeUndefined();
+            // 新しい応答は送信される
+            expect(socket.emit).toHaveBeenCalledWith('text-chunk', { content: '新しい応答。' });
+        });
+
+        it('does not emit stale text or audio for a superseded voice response', async () => {
+            const socket = makeSocket();
+            const svc = new ChatService();
+
+            let releaseFirst!: () => void;
+            const firstGate = new Promise<void>((r) => {
+                releaseFirst = r;
+            });
+
+            generateResponseStream.mockReset();
+            generateResponseStream
+                .mockImplementationOnce(async () =>
+                    (async function* () {
+                        yield { text: () => '最初の音声。' };
+                        await firstGate; // 2つ目の入力が割り込むまで停止
+                        yield { text: () => '割り込み後の音声。' };
+                    })(),
+                )
+                .mockImplementationOnce(async () => makeStream(['新しい音声。']));
+
+            const p1 = svc.handleUserInput(socket as never, { text: 'first', isVoiceInput: true });
+            await tick();
+            const p2 = svc.handleUserInput(socket as never, { text: 'second', isVoiceInput: true });
+            releaseFirst();
+            await Promise.all([p1, p2]);
+
+            // 割り込み後の文はテキスト（audio-chunk type:text）として送信されない
+            const staleText = socket.emit.mock.calls.find(
+                (c) =>
+                    c[0] === 'audio-chunk' &&
+                    c[1].type === 'text' &&
+                    c[1].content === '割り込み後の音声。',
+            );
+            expect(staleText).toBeUndefined();
+            // 完了は新しい応答の1回のみ
+            const completes = socket.emit.mock.calls.filter((c) => c[0] === 'response-complete');
+            expect(completes).toHaveLength(1);
+            // 新しい応答は送信される
+            expect(socket.emit).toHaveBeenCalledWith('audio-chunk', { type: 'text', content: '新しい音声。' });
+        });
+
+        it('does not emit an error for a response that was already superseded', async () => {
+            const socket = makeSocket();
+            const svc = new ChatService();
+
+            let releaseFirst!: () => void;
+            const firstGate = new Promise<void>((r) => {
+                releaseFirst = r;
+            });
+
+            generateResponseStream.mockReset();
+            generateResponseStream
+                .mockImplementationOnce(async () =>
+                    (async function* () {
+                        yield { text: () => '途中。' };
+                        await firstGate;
+                        throw new Error('late failure'); // 割り込み後に失敗する
+                    })(),
+                )
+                .mockImplementationOnce(async () => makeStream(['新しい応答。']));
+
+            const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+            const p1 = svc.handleUserInput(socket as never, { text: 'first', isVoiceInput: false });
+            await tick();
+            const p2 = svc.handleUserInput(socket as never, { text: 'second', isVoiceInput: false });
+            releaseFirst();
+            await Promise.all([p1, p2]);
+            errSpy.mockRestore();
+
+            // 割り込まれた応答が失敗しても、ユーザーにはエラーを通知しない
+            const errors = socket.emit.mock.calls.filter((c) => c[0] === 'error');
+            expect(errors).toHaveLength(0);
+            // 新しい応答は正常に完了する
+            expect(socket.emit).toHaveBeenCalledWith('response-complete');
+        });
+
+        it('drops the superseded response from chat history', async () => {
+            const socket = makeSocket();
+            const svc = new ChatService();
+
+            let releaseFirst!: () => void;
+            const firstGate = new Promise<void>((r) => {
+                releaseFirst = r;
+            });
+
+            generateResponseStream.mockReset();
+            generateResponseStream
+                .mockImplementationOnce(async () =>
+                    (async function* () {
+                        yield { text: () => '古い応答。' };
+                        await firstGate;
+                    })(),
+                )
+                .mockImplementationOnce(async () => makeStream(['新しい応答。']))
+                .mockImplementationOnce(async () => makeStream(['3回目。']));
+
+            const p1 = svc.handleUserInput(socket as never, { text: 'first', isVoiceInput: false });
+            await tick();
+            const p2 = svc.handleUserInput(socket as never, { text: 'second', isVoiceInput: false });
+            releaseFirst();
+            await Promise.all([p1, p2]);
+
+            // 3回目の入力に渡る履歴を検査する
+            await svc.handleUserInput(socket as never, { text: 'third', isVoiceInput: false });
+            const history = generateResponseStream.mock.calls.at(-1)![2] as {
+                role: string;
+                parts: { text: string }[];
+            }[];
+            const modelTexts = history.filter((h) => h.role === 'model').map((h) => h.parts[0].text);
+            // 割り込まれた「古い応答。」はモデル履歴に残らない
+            expect(modelTexts).toContain('新しい応答。');
+            expect(modelTexts).not.toContain('古い応答。');
+        });
+    });
+
     describe('error handling', () => {
         it('should emit an internal error when the generator throws', async () => {
             generateResponseStream.mockRejectedValue(new Error('gemini down'));

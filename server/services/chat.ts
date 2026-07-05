@@ -18,6 +18,10 @@ const MIN_AUDIO_CHUNK_BYTES = 4 * 1024;
 export class ChatService {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private chatHistory: any[] = [];
+  // Monotonically increasing id of the latest input. A newer input supersedes
+  // (cancels) any response still being generated on the same socket, so a user
+  // interrupting the bot (barge-in) does not produce overlapping responses.
+  private activeGeneration = 0;
 
   async handleUserInput(
     socket: Socket,
@@ -29,6 +33,11 @@ export class ChatService {
       socket.emit("error", { message: "Input is invalid" });
       return;
     }
+
+    // Claim this generation; if a newer input arrives it will bump the counter
+    // and every guarded step below stops emitting for this (now stale) response.
+    const generation = ++this.activeGeneration;
+    const isSuperseded = (): boolean => generation !== this.activeGeneration;
 
     this.chatHistory.push({ role: "user", parts: [{ text }] });
     if (this.chatHistory.length > 20) {
@@ -49,6 +58,7 @@ export class ChatService {
       let audioEmitChain: Promise<void> = Promise.resolve();
 
       const enqueueSentence = (sentence: string): void => {
+        if (isSuperseded()) return;
         const uiText = stripTags(sentence);
 
         if (isVoiceInput) {
@@ -58,15 +68,23 @@ export class ChatService {
           const streamPromise = this.startEagerTTSStream(sentence, ttsService, language);
 
           // Chain: emit this sentence's audio only after the previous one finishes
-          audioEmitChain = audioEmitChain.then(() =>
-            this.drainStreamToSocket(socket, streamPromise),
-          );
+          audioEmitChain = audioEmitChain.then(() => {
+            if (isSuperseded()) {
+              // Superseded by a newer input: discard the buffered audio without
+              // emitting it. Resuming with no data listener drains and drops it.
+              return streamPromise.then((s) => {
+                s?.resume();
+              });
+            }
+            return this.drainStreamToSocket(socket, streamPromise);
+          });
         } else {
           socket.emit("text-chunk", { content: uiText });
         }
       };
 
       for await (const chunk of stream) {
+        if (isSuperseded()) break;
         const chunkText = chunk.text();
         fullResponseText += chunkText;
 
@@ -76,13 +94,20 @@ export class ChatService {
         }
       }
 
-      const remaining = streamBuffer.flush();
-      if (remaining) {
-        enqueueSentence(remaining);
+      if (!isSuperseded()) {
+        const remaining = streamBuffer.flush();
+        if (remaining) {
+          enqueueSentence(remaining);
+        }
       }
 
       // Wait for all audio to finish before signaling completion
       await audioEmitChain;
+
+      // A newer input arrived while generating: drop this stale response entirely
+      // (no history push, recommendations or completion) to keep the conversation
+      // order intact and avoid emitting events that overlap the newer response.
+      if (isSuperseded()) return;
 
       this.chatHistory.push({
         role: "model",
@@ -98,7 +123,10 @@ export class ChatService {
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       console.error("Error processing input:", message);
-      socket.emit("error", { message: "Internal server error occurred." });
+      // Only surface the error for the response the client is still expecting.
+      if (!isSuperseded()) {
+        socket.emit("error", { message: "Internal server error occurred." });
+      }
     }
   }
 

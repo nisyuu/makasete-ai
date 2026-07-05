@@ -36,9 +36,13 @@ export class GeminiTTSService implements TTSService {
         return this.client;
     }
 
+    // Chirp 3: HD voices — the latest high-fidelity generation, suitable for
+    // low-latency real-time synthesis. Voice names are shared across locales
+    // in the <locale>-Chirp3-HD-<voice> format. "Kore" is a calm, composed
+    // voice that fits customer-support / help-desk / FAQ use cases.
     private static readonly VOICES: Record<string, texttospeech_v1.Schema$VoiceSelectionParams> = {
-        ja: { languageCode: 'ja-JP', name: 'ja-JP-Neural2-D' },
-        en: { languageCode: 'en-US', name: 'en-US-Neural2-D' },
+        ja: { languageCode: 'ja-JP', name: 'ja-JP-Chirp3-HD-Kore' },
+        en: { languageCode: 'en-US', name: 'en-US-Chirp3-HD-Kore' },
     };
 
     public async generateSpeechStream(text: string, language = 'ja'): Promise<Readable> {
@@ -52,9 +56,10 @@ export class GeminiTTSService implements TTSService {
                     requestBody: {
                         input: isSsml ? { ssml: text } : { text },
                         voice,
+                        // Note: Chirp 3 HD voices do not support the speakingRate
+                        // (or pitch) parameter, so it is intentionally omitted.
                         audioConfig: {
                             audioEncoding: 'MP3',
-                            speakingRate: 1.15,
                         },
                     }
                 }, (err, res) => {
