@@ -314,6 +314,51 @@ describe('initAudioHandler', () => {
             expect(opts.onRecordingEnd).toHaveBeenCalledWith('こんにちはまた明日');
         });
 
+        it('should join Japanese transcripts by stripping recognizer-inserted spaces', () => {
+            const { opts } = setup({ language: 'ja' });
+            const rec = createdRecognitions[0];
+
+            // 認識エンジンはフレーズ間にスペース（半角・全角）を挿入することがある。
+            // 日本語はスペースで区切らないため、プレビュー段階から除去して繋げる。
+            rec.onresult!(
+                makeResultEvent(0, [{ transcript: 'こんにちは 今日は　いい天気', isFinal: false }]),
+            );
+            expect(opts.onTranscript).toHaveBeenLastCalledWith('こんにちは今日はいい天気');
+
+            rec.onresult!(
+                makeResultEvent(0, [{ transcript: 'こんにちは 今日は いい天気 ですね', isFinal: true }]),
+            );
+            rec.onend!();
+            expect(opts.onRecordingEnd).toHaveBeenCalledWith('こんにちは今日はいい天気ですね');
+        });
+
+        it('should join Japanese final segments without spaces between them', () => {
+            const { opts } = setup({ language: 'ja' });
+            const rec = createdRecognitions[0];
+
+            // 複数の確定セグメントが先頭スペース付きで届いても繋がった文章になる
+            // （event.results は累積なので 2 回目は resultIndex=1 で新規分のみ加算される）
+            rec.onresult!(makeResultEvent(0, [{ transcript: 'おはよう', isFinal: true }]));
+            rec.onresult!(
+                makeResultEvent(1, [
+                    { transcript: 'おはよう', isFinal: true },
+                    { transcript: ' ございます', isFinal: true },
+                ]),
+            );
+
+            rec.onend!();
+            expect(opts.onRecordingEnd).toHaveBeenCalledWith('おはようございます');
+        });
+
+        it('should preserve spaces for English transcripts', () => {
+            const { opts } = setup({ language: 'en' });
+            const rec = createdRecognitions[0];
+
+            rec.onresult!(makeResultEvent(0, [{ transcript: 'good morning everyone', isFinal: true }]));
+            rec.onend!();
+            expect(opts.onRecordingEnd).toHaveBeenCalledWith('good morning everyone');
+        });
+
         it('should reset accumulated text between recordings', () => {
             const { handler, opts } = setup();
             const rec = createdRecognitions[0];
