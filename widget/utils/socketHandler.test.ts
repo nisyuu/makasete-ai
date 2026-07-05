@@ -37,9 +37,13 @@ describe('initSocketHandler', () => {
         return { handler, cbs };
     }
 
-    it('should connect to the provided server url', () => {
+    it('should connect to the provided server url without a trailing slash', () => {
         setup();
-        expect(ioMock).toHaveBeenCalledWith('http://localhost');
+        // addTrailingSlash: false を明示し、末尾スラッシュを除去するプロキシ
+        // (Firebase App Hosting 等) の背後でも 404 にならないようにする。
+        expect(ioMock).toHaveBeenCalledWith('http://localhost', {
+            addTrailingSlash: false,
+        });
     });
 
     it('should route socket events to the corresponding callbacks', () => {
