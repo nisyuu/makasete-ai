@@ -241,6 +241,40 @@ describe('ChatService', () => {
         });
     });
 
+    describe('recommendations', () => {
+        const productSheet = new Map([
+            ['products', [
+                { name: 'ブレンドコーヒー', description: '深煎り豆の香り高い一杯', tags: 'コーヒー' },
+                { name: '抹茶ラテ', description: '宇治抹茶を使ったラテ', tags: '抹茶' },
+            ]],
+        ]);
+
+        it('should emit only the products the AI actually mentioned in its answer', async () => {
+            getAllSheetData.mockReturnValue(productSheet);
+            generateResponseStream.mockResolvedValue(makeStream(['おすすめはブレンドコーヒーです。']));
+            const socket = makeSocket();
+            const svc = new ChatService();
+
+            await svc.handleUserInput(socket as never, { text: '何かおすすめはありますか', isVoiceInput: false });
+
+            const rec = socket.emit.mock.calls.find((c) => c[0] === 'recommendation');
+            expect(rec).toBeTruthy();
+            expect(rec![1].products.map((p: { name: string }) => p.name)).toEqual(['ブレンドコーヒー']);
+        });
+
+        it('should not emit recommendations for an unrelated question', async () => {
+            getAllSheetData.mockReturnValue(productSheet);
+            generateResponseStream.mockResolvedValue(makeStream(['営業時間は10時から18時です。']));
+            const socket = makeSocket();
+            const svc = new ChatService();
+
+            await svc.handleUserInput(socket as never, { text: '営業時間を教えてください', isVoiceInput: false });
+
+            const rec = socket.emit.mock.calls.find((c) => c[0] === 'recommendation');
+            expect(rec).toBeUndefined();
+        });
+    });
+
     describe('cancellation (barge-in)', () => {
         const tick = () => new Promise((r) => setTimeout(r, 0));
 

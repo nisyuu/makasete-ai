@@ -111,7 +111,11 @@ export class ChatService {
         parts: [{ text: fullResponseText }],
       });
 
-      const recommendations = getRecommendations(text, allData);
+      // Pass the assistant's answer so cards track what was actually
+      // recommended, not just keyword overlap with the user's message.
+      const recommendations = getRecommendations(text, allData, {
+        responseText: fullResponseText,
+      });
       if (recommendations.length > 0) {
         socket.emit("recommendation", { products: recommendations });
       }
