@@ -174,7 +174,14 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
 
     const rec = new SpeechRecognitionAPI();
     recognition = rec;
-    rec.lang = language === "en" ? "en-US" : "ja-JP";
+    const recognitionLang = language === "en" ? "en-US" : "ja-JP";
+    // 日本語は単語をスペースで区切らないため、認識エンジンがフレーズ間に
+    // 挿入するスペースを除去して文章を繋げる。英語はスペースが語の区切り
+    // として必要なのでそのまま残す。
+    const stripSpaces = recognitionLang === "ja-JP";
+    const normalizeTranscript = (text: string): string =>
+      stripSpaces ? text.replace(/\s+/g, "") : text;
+    rec.lang = recognitionLang;
     rec.continuous = false;
     // 認識途中の結果も受け取り、入力欄にプレビュー表示する。
     // ただし送信は発話が確定して録音が終了する onend のタイミングで一度だけ行う。
@@ -186,7 +193,7 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
       let interim = "";
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i];
-        const transcript = result[0].transcript;
+        const transcript = normalizeTranscript(result[0].transcript);
         if (result.isFinal) {
           finalTranscript += transcript;
         } else {
