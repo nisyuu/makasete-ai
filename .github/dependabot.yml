@@ -32,6 +32,15 @@ updates:
       interval: "weekly"
       time: "09:00"
       timezone: "Asia/Tokyo"
+    ignore:
+      # typescript-eslint (v8) が TypeScript 7 に未対応のため、
+      # typescript のメジャーアップデート (7.x 以降) を保留する。
+      # TypeScript 7 は tsc がネイティブ移植された版で `ts.Extension` 等の
+      # 内部 API が変わり、@typescript-eslint/typescript-estree が読み込み時に
+      # クラッシュして lint が失敗する (peer: typescript ">=4.8.4 <6.1.0")。
+      # typescript-eslint が TypeScript 7 に対応したら、この ignore を解除すること。
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
     groups:
       patch-updates:
         patterns:
