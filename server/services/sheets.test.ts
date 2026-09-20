@@ -130,7 +130,8 @@ describe('sheets service utilities', () => {
             });
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             (sheets.spreadsheets.values.get as any).mockImplementation(({ range }: { range: string }) => {
-                if (range.startsWith('prompt')) {
+                // range はシート名をシングルクォートで囲んだ形式（例: 'prompt'）
+                if (range.includes('prompt')) {
                     return Promise.resolve({ data: { values: [['You are a bot']] } });
                 }
                 return Promise.resolve({ data: { values: [['ID'], ['1']] } });

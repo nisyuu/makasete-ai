@@ -41,6 +41,12 @@ resource "google_cloud_run_service" "makasete_servers" {
   name     = "makasete-ai-${each.key}"
   location = var.region
 
+  # Secret のバージョンと読み取り権限が揃ってからサービスを作る
+  depends_on = [
+    google_secret_manager_secret_version.server_secrets,
+    google_secret_manager_secret_iam_member.server_secret_accessor,
+  ]
+
   template {
     spec {
       service_account_name = google_service_account.makasete_server_sa.email
@@ -51,13 +57,29 @@ resource "google_cloud_run_service" "makasete_servers" {
           name  = "GOOGLE_SHEETS_ID"
           value = each.value.google_sheets_id
         }
+        # Security: API キーは Secret Manager から参照する。平文の env として
+        # 置くと、run.viewer 権限だけで `gcloud run services describe` から
+        # 読み取れてしまう。
         env {
-          name  = "GEMINI_API_KEY"
-          value = each.value.gemini_api_key
+          name = "GEMINI_API_KEY"
+          value_from {
+            secret_key_ref {
+              name = google_secret_manager_secret.server_secrets["${each.key}-gemini-api-key"].secret_id
+              key  = "latest"
+            }
+          }
         }
-        env {
-          name  = "ELEVENLABS_API_KEY"
-          value = each.value.elevenlabs_api_key
+        dynamic "env" {
+          for_each = each.value.elevenlabs_api_key != "" ? [1] : []
+          content {
+            name = "ELEVENLABS_API_KEY"
+            value_from {
+              secret_key_ref {
+                name = google_secret_manager_secret.server_secrets["${each.key}-elevenlabs-api-key"].secret_id
+                key  = "latest"
+              }
+            }
+          }
         }
         env {
           name  = "ALLOWED_ORIGINS"

@@ -1,27 +1,40 @@
-FROM node:24-slim
-
-# Install ffmpeg and clean up
-RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
+# ---- Build stage ----
+# ビルドには devDependencies（vite / tsc）が必要なので、ビルド専用の段を分ける。
+# 最終イメージにはビルド成果物と本番依存だけを持ち込み、ソースや開発用ツール、
+# 誤ってコピーされうる資格情報がレイヤーに残らないようにする。
+FROM node:24-slim AS builder
 
 WORKDIR /app
 
-# Install pnpm
 RUN npm install -g pnpm
 
-# Copy package info
 COPY package.json pnpm-lock.yaml ./
-
-# Install dependencies
 RUN pnpm install --frozen-lockfile
 
-# Copy source code
 COPY . .
-
-# Build widget and server
 RUN pnpm build
 
-# Expose port
+# 本番依存だけを残す（devDependencies を削ぎ落とす）
+RUN pnpm prune --prod
+
+# ---- Runtime stage ----
+FROM node:24-slim AS runtime
+
+# Express の既定エラーハンドラは production 以外だとスタックトレースを
+# レスポンスに含める。本番イメージでは必ず production にする。
+ENV NODE_ENV=production
+
+WORKDIR /app
+
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/package.json ./package.json
+
+# Security: root で実行しない。node イメージには非 root の `node` ユーザーが
+# あらかじめ用意されている。
+USER node
+
 EXPOSE 8080
 
-# Start server
-CMD ["pnpm", "start:prod"]
+# pnpm を介さず直接起動する（実行段に pnpm を入れないため）
+CMD ["node", "dist/server/index.js"]

@@ -30,12 +30,22 @@ export function formatMessageText(rawText: string): string {
   };
 
   // 2. Safe URL check for Markdown links
-  // Only allow http, https, and relative paths. Block javascript:, etc.
+  // Only allow http, https, and same-origin relative paths. Block javascript:, etc.
   const sanitizeUrl = (url: string) => {
     const trimmed = url.trim();
-    if (/^(https?:\/\/|\/)/i.test(trimmed)) {
+
+    // プロトコル相対 URL（//evil.example/...）は先頭が "/" なので素朴な
+    // 相対パス判定をすり抜け、任意の外部ホストへのリンクになる。表示テキストと
+    // 実際の遷移先が食い違うリンクを LLM 出力から作れてしまうため、
+    // スラッシュ 1 個で始まるものだけを相対パスとして許可する。
+    if (/^\/(?!\/)/.test(trimmed)) {
       return trimmed;
     }
+
+    if (/^https?:\/\//i.test(trimmed)) {
+      return trimmed;
+    }
+
     return "#";
   };
 

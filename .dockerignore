@@ -3,15 +3,40 @@
 node_modules
 dist
 build
+
+# Environment files
 .env
 .env.*
+
+# Security: service account keys must never be baked into an image layer.
+# `COPY . .` picks up anything not listed here, and these files really do exist
+# in a working checkout.
 google-key.json
+service-account-key.json
+*-key.json
+*credentials*.json
+
+# Terraform: state contains every resource attribute in plaintext
 terraform.tfvars
 *.tfvars
+*.tfstate
+*.tfstate.*
 terraform/
 .terraform/
+
+# Tooling and docs
 README.md
+AGENTS.md
+CLAUDE.md
+GEMINI.md
 LICENSE
 Dockerfile
+.dockerignore
 .clasp.json
 gas/
+docs/
+coverage/
+.claude/
+.github/
+.vscode/
+.idea/

@@ -1,41 +1,64 @@
-import express, { Request, Response } from "express";
+import express, { NextFunction, Request, Response } from "express";
 import { createServer } from "http";
 import { Server, Socket } from "socket.io";
 import cors from "cors";
 import path from "path";
 import { rateLimit } from "express-rate-limit";
-import { config } from "./config";
+import { config, validateConfig } from "./config";
 import {
   fetchAllSheets,
   getAllSheetData,
   dataReadyPromise,
+  isDataReady,
 } from "./services/sheets";
 import { ChatService } from "./services/chat";
+import { isOriginAllowed, parseAllowedOrigins } from "./utils/origin";
+import { resolveClientIp } from "./utils/clientIp";
+import { TokenBucketLimiter } from "./utils/rateLimiter";
+
+// 設定漏れを起動時に報告する（最初のチャットで初めて気付く事態を避ける）
+const missingConfig = validateConfig();
+if (missingConfig.length > 0) {
+  console.error(
+    `[config] Missing required environment variables: ${missingConfig.join(", ")}`,
+  );
+}
 
 const app = express();
 
 // Security: Trust proxy for Cloud Run to get correct client IP for rate limiting
-app.set("trust proxy", 1);
+const TRUSTED_PROXY_COUNT = 1;
+app.set("trust proxy", TRUSTED_PROXY_COUNT);
 
 // Security: Use environment variable for allowed origins
-const allowedOrigins = process.env.ALLOWED_ORIGINS
-  ? process.env.ALLOWED_ORIGINS.includes(",")
-    ? process.env.ALLOWED_ORIGINS.split(",")
-    : process.env.ALLOWED_ORIGINS
-  : "*";
+const allowedOrigins = parseAllowedOrigins(process.env.ALLOWED_ORIGINS);
 
 // 1. CORS Middleware (Must be FIRST)
+// credentials は使わない: Cookie も Authorization も送らないため不要で、
+// origin "*" と併用するとブラウザ側でリクエストが拒否される。
 app.use(
   cors({
     origin: allowedOrigins,
     methods: ["GET", "POST", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-    credentials: true,
+    allowedHeaders: ["Content-Type"],
   }),
 );
 
 // Security: Rate limiting
-const limiter = rateLimit({
+//
+// ウィジェットは 1 ページ表示ごとに widget.js / /health / /api/settings を叩く。
+// 全ルートを一つの厳しい上限で縛ると、企業 NAT や CGNAT の背後にいる複数ユーザーが
+// 同一 IP とみなされて数十ページビューでウィジェットごと 429 になる。静的配信と
+// 読み取り API は緩く、それ以外は厳しく、と経路ごとに分ける。
+const staticLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  limit: 1000,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: "Too many requests from this IP, please try again later.",
+});
+
+const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   limit: 100,
   standardHeaders: "draft-7",
@@ -43,14 +66,24 @@ const limiter = rateLimit({
   message: "Too many requests from this IP, please try again later.",
 });
 
-app.use(limiter);
-
 const httpServer = createServer(app);
 
 const io = new Server(httpServer, {
   cors: {
     origin: allowedOrigins,
     methods: ["GET", "POST"],
+  },
+  // Security: cors の origin 設定は不一致でもヘッダを付けないだけで接続を拒否せず、
+  // engine.io 自身も Origin を検証しない。WebSocket 直結（transports: ["websocket"]）
+  // なら第三者サイトからそのまま接続できてしまうため、ハンドシェイク時に明示的に
+  // Origin を照合して拒否する。
+  allowRequest: (req, callback) => {
+    const origin = req.headers.origin;
+    if (isOriginAllowed(origin, allowedOrigins)) {
+      return callback(null, true);
+    }
+    console.warn(`[Socket] Rejected handshake from disallowed origin: ${origin}`);
+    return callback("origin not allowed", false);
   },
   // Firebase App Hosting (Cloud Run 前段のプロキシ) は末尾スラッシュを除去して
   // リクエストを転送するため、既定の `/socket.io/` では engine.io がパスを
@@ -63,14 +96,33 @@ const io = new Server(httpServer, {
 // Security: Simple Socket.io rate limiting
 const socketConnections = new Map<string, number>();
 
+// Security: user-input は 1 件ごとに LLM ストリームと文単位の TTS を発火させ、
+// そのまま課金につながる。接続単位と IP 単位の両方で上限を設ける。
+const socketEventLimiter = new TokenBucketLimiter({
+  capacity: 10,
+  refillPerSecond: 10 / 60, // 10 requests per minute, burst 10
+});
+const ipEventLimiter = new TokenBucketLimiter({
+  capacity: 30,
+  refillPerSecond: 30 / 60, // 30 requests per minute, burst 30
+});
+
+// 放置されたバケットを定期的に回収する（満タンに戻ったものだけ削除）
+const limiterPruneTimer = setInterval(
+  () => {
+    socketEventLimiter.prune();
+    ipEventLimiter.prune();
+  },
+  5 * 60 * 1000,
+);
+limiterPruneTimer.unref();
+
 function getClientIp(socket: Socket): string {
-  const forwarded = socket.handshake.headers["x-forwarded-for"];
-  if (forwarded) {
-    return (
-      Array.isArray(forwarded) ? forwarded[0] : forwarded.split(",")[0]
-    ).trim();
-  }
-  return socket.handshake.address;
+  return resolveClientIp(
+    socket.handshake.headers["x-forwarded-for"],
+    socket.handshake.address,
+    TRUSTED_PROXY_COUNT,
+  );
 }
 
 io.use((socket, next) => {
@@ -84,23 +136,33 @@ io.use((socket, next) => {
 });
 
 // Middleware
-app.use(express.json());
+app.use(express.json({ limit: "64kb" }));
 
 // Static files (Widget)
-app.use("/public", express.static(path.join(process.cwd(), "dist/public")));
+app.use(
+  "/public",
+  staticLimiter,
+  express.static(path.join(process.cwd(), "dist/public")),
+);
 
 // Demo Page
-app.get("/demo", (req: Request, res: Response) => {
+app.get("/demo", staticLimiter, (req: Request, res: Response) => {
   res.sendFile(path.join(process.cwd(), "dist/public/demo.html"));
 });
 
-app.get("/health", async (req: Request, res: Response) => {
+app.get("/health", staticLimiter, async (req: Request, res: Response) => {
   await dataReadyPromise;
+  // Sheets の取得に失敗していれば「準備完了」を名乗らない。空のキャッシュのまま
+  // ready を返すと、プロンプトも知識も無いインスタンスに Cloud Run がトラフィックを
+  // 流してしまう。
+  if (!isDataReady()) {
+    return res.status(503).json({ status: "unavailable" });
+  }
   res.json({ status: "ready" });
 });
 
 // API Endpoints
-app.get("/api/:sheetName", async (req: Request, res: Response) => {
+app.get("/api/:sheetName", staticLimiter, async (req: Request, res: Response) => {
   await dataReadyPromise;
   const { sheetName } = req.params;
 
@@ -123,6 +185,21 @@ app.get("/api/:sheetName", async (req: Request, res: Response) => {
   }
 });
 
+// 上で個別に limiter を付けていない経路（今後追加される POST など）には
+// 厳しい方の上限を適用する。
+app.use(apiLimiter);
+
+// Security: エラー応答にスタックトレースを含めない。Express 既定のエラーハンドラは
+// NODE_ENV=production 以外だと err.stack を返し、絶対パスなどの内部情報が漏れる。
+app.use((err: unknown, req: Request, res: Response, next: NextFunction) => {
+  const message = err instanceof Error ? err.message : String(err);
+  console.error("[HTTP] Unhandled error:", message);
+  if (res.headersSent) {
+    return next(err);
+  }
+  res.status(500).json({ error: "Internal server error" });
+});
+
 // Initialize caching
 fetchAllSheets().then(() => {
   console.log("Initial data fetch (all sheets) complete.");
@@ -131,16 +208,33 @@ fetchAllSheets().then(() => {
 // WebSocket logic
 io.on("connection", (socket) => {
   const chatService = new ChatService();
+  const clientIp = getClientIp(socket);
 
   socket.on(
     "user-input",
     (data: { text: string; isVoiceInput: boolean; language?: string }) => {
-      chatService.handleUserInput(socket, data);
+      if (
+        !socketEventLimiter.tryConsume(socket.id) ||
+        !ipEventLimiter.tryConsume(clientIp)
+      ) {
+        socket.emit("error", {
+          message: "Too many requests. Please wait a moment and try again.",
+        });
+        return;
+      }
+
+      // handleUserInput は async。await も catch もしないと、投げられた例外が
+      // unhandled rejection となり Node 24 の既定設定ではプロセスごと落ちる。
+      void chatService.handleUserInput(socket, data).catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error("[Socket] handleUserInput failed:", message);
+        socket.emit("error", { message: "Internal server error occurred." });
+      });
     },
   );
 
   socket.on("disconnect", () => {
-    const clientIp = getClientIp(socket);
+    socketEventLimiter.release(socket.id);
     const count = socketConnections.get(clientIp);
     if (count && count > 1) {
       socketConnections.set(clientIp, count - 1);
@@ -148,6 +242,18 @@ io.on("connection", (socket) => {
       socketConnections.delete(clientIp);
     }
   });
+});
+
+// Safety net: 想定外の unhandled rejection でプロセスを落とさない。
+// Node 24 の既定は --unhandled-rejections=throw なので、ハンドラが無いと
+// 1 件の reject で全接続が切断される。
+process.on("unhandledRejection", (reason: unknown) => {
+  const message = reason instanceof Error ? reason.message : String(reason);
+  console.error("[Process] Unhandled rejection:", message);
+});
+
+process.on("uncaughtException", (error: Error) => {
+  console.error("[Process] Uncaught exception:", error.message);
 });
 
 // Start Server

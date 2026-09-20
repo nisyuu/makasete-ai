@@ -14,7 +14,10 @@ makasete_servers = {
   }
 }
 
-allowed_origins = "*"
+# 埋め込みを許可するサイトの origin をカンマ区切りで指定する。
+# "*" のままだと任意の第三者サイトから接続でき、LLM / TTS の利用料を
+# 消費されるため、本番では必ず実際の origin を設定すること。
+allowed_origins = "https://your-shop.example,https://www.your-shop.example"
 tts_provider    = "gemini"
 
 github_repository     = "your-username/makasete-ai"

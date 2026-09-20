@@ -7,11 +7,29 @@ export type SheetData = Record<string, string>;
 
 let sheetCache: Map<string, SheetData[]> = new Map();
 let systemPromptCache: string | null = null;
+// 取得が成功してキャッシュが使える状態かどうか。dataReadyPromise は「起動処理が
+// 終わった」ことしか表さないため、/health が空のキャッシュを ready と誤って
+// 報告しないようにフラグを分けている。
+let dataReady = false;
 
 let resolveReady: () => void;
 export const dataReadyPromise = new Promise<void>((resolve) => {
     resolveReady = resolve;
 });
+
+/** Sheets の取得に成功し、キャッシュが利用可能かどうかを返す。 */
+export function isDataReady(): boolean {
+    return dataReady;
+}
+
+/**
+ * シート名を A1 記法の range として安全に埋め込む。
+ * シート名に空白・記号・引用符が含まれていてもパースエラーにならないよう、
+ * シングルクォートで囲み、内部の `'` は `''` にエスケープする。
+ */
+export function buildSheetRange(name: string): string {
+    return `'${name.replace(/'/g, "''")}'`;
+}
 
 /**
  * Maps spreadsheet rows to objects using the first row as keys.
@@ -91,7 +109,7 @@ export async function fetchAllSheets(): Promise<void> {
             try {
                 const response = await sheets.spreadsheets.values.get({
                     spreadsheetId: config.googleSheetsId,
-                    range: `${name}!A1:Z`,
+                    range: buildSheetRange(name),
                 });
 
                 const allValues = response.data.values;
@@ -115,11 +133,14 @@ export async function fetchAllSheets(): Promise<void> {
 
         sheetCache = newCache;
         if (systemPromptCache === null) systemPromptCache = "";
-        
+
+        dataReady = true;
         resolveReady();
     } catch (err) {
         console.error("Error in fetchAllSheets:", err);
-        resolveReady(); // Ensure we don't block forever
+        // 取得に失敗したので ready フラグは立てない（/health が 503 を返す）。
+        // それでも Promise は解決させ、リクエストが永久に待たされるのを防ぐ。
+        resolveReady();
     }
 }
 

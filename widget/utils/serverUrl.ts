@@ -57,16 +57,29 @@ function findWidgetScript(
   const scripts =
     options.scripts ??
     document.querySelectorAll<HTMLScriptElement>("script[src]");
+
+  // data-server-url を明示しているタグを最優先で探す。ページ所有者が意図して
+  // 指定した値であり、他ベンダーのスクリプトと取り違える余地がない。
+  for (let i = scripts.length - 1; i >= 0; i--) {
+    if (scripts[i].hasAttribute("data-server-url")) {
+      return scripts[i];
+    }
+  }
+
+  // Security: 単に "/widget.js" で終わるだけの src に一致させると、ホストページが
+  // 読み込んでいる別ベンダーの widget.js を掴み、その origin にチャット内容を
+  // 送ってしまう。配信パスである /public/widget.js に限定する。
   for (let i = scripts.length - 1; i >= 0; i--) {
     const candidate = scripts[i];
     try {
-      if (new URL(candidate.src).pathname.endsWith("/widget.js")) {
+      if (new URL(candidate.src).pathname.endsWith("/public/widget.js")) {
         return candidate;
       }
     } catch {
       // 不正な src は無視して次の候補へ
     }
   }
+
   return null;
 }
 

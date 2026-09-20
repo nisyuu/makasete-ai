@@ -1,6 +1,7 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { config } from "../config";
 import { getSystemPrompt, SheetData } from "./sheets";
+import { resolveLanguage } from "../utils/language";
 
 let genAI: GoogleGenerativeAI;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -47,15 +48,25 @@ ${dynamicContext}
 `;
 }
 
-const LANGUAGE_PROMPTS: Record<string, string> = {
-    en: "Please respond in English.",
-    ja: "日本語で回答してください。",
-};
+// Object.create(null) でプロトタイプを持たない辞書にする。通常のオブジェクト
+// リテラルだと `LANGUAGE_PROMPTS["constructor"]` が Object 関数を返し、
+// `?? LANGUAGE_PROMPTS.ja` のフォールバックをすり抜けて関数がそのまま
+// プロンプトに混入する。resolveLanguage と二重に防御する。
+const LANGUAGE_PROMPTS: Record<string, string> = Object.assign(
+    Object.create(null),
+    {
+        en: "Please respond in English.",
+        ja: "日本語で回答してください。",
+    },
+);
 
-const LANGUAGE_ACK: Record<string, string> = {
-    en: "Understood. I have reviewed the provided information and am ready to assist.",
-    ja: "承知いたしました。提供された情報を把握しました。接客を開始します。",
-};
+const LANGUAGE_ACK: Record<string, string> = Object.assign(
+    Object.create(null),
+    {
+        en: "Understood. I have reviewed the provided information and am ready to assist.",
+        ja: "承知いたしました。提供された情報を把握しました。接客を開始します。",
+    },
+);
 
 /**
  * Generates a text response stream from Gemini.
@@ -72,8 +83,9 @@ export async function generateResponseStream(
         initGemini();
     }
 
+    const safeLanguage = resolveLanguage(language);
     const basePrompt = getSystemPrompt() || `あなたは親切なAIアシスタントです。`;
-    const langInstruction = LANGUAGE_PROMPTS[language] ?? LANGUAGE_PROMPTS.ja;
+    const langInstruction = LANGUAGE_PROMPTS[safeLanguage] ?? LANGUAGE_PROMPTS.ja;
     const systemInstruction = buildSystemInstruction(basePrompt, allData) + `\n${langInstruction}`;
 
     try {
@@ -85,7 +97,7 @@ export async function generateResponseStream(
                 },
                 {
                     role: "model",
-                    parts: [{ text: LANGUAGE_ACK[language] ?? LANGUAGE_ACK.ja }]
+                    parts: [{ text: LANGUAGE_ACK[safeLanguage] ?? LANGUAGE_ACK.ja }]
                 },
                 ...history
             ]
