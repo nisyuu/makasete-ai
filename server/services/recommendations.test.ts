@@ -77,7 +77,7 @@ describe('getRecommendations', () => {
       tags: 'shirt',
     }));
     const data = makeProductSheet(rows);
-    expect(getRecommendations('shirt', data, 3)).toHaveLength(3);
+    expect(getRecommendations('shirt', data, { maxResults: 3 })).toHaveLength(3);
   });
 
   it('should skip rows with no name', () => {
@@ -114,5 +114,67 @@ describe('getRecommendations', () => {
     const results = getRecommendations('シャツ', data);
     expect(results).toHaveLength(1);
     expect(results[0].name).toBe('シャツ');
+  });
+});
+
+describe('relevance filtering (unrelated cards must not appear)', () => {
+  const coffeeShop = makeProductSheet([
+    { name: 'ブレンドコーヒー', description: '当店人気のおすすめ商品です', tags: 'コーヒー,ドリンク' },
+    { name: '抹茶ラテ', description: '宇治抹茶を使った人気のドリンク', tags: '抹茶,ラテ' },
+  ]);
+
+  it('should not show cards when only generic words match the description', () => {
+    // 音声入力は分かち書きされるため「おすすめ」「商品」が単独トークンになり、
+    // 説明文の常套句と偶然一致してしまう（修正前は全商品が表示された）
+    expect(getRecommendations('おすすめ の 商品 を 教えて ください', coffeeShop)).toEqual([]);
+  });
+
+  it('should not show a card for a single coincidental description hit', () => {
+    const data = makeProductSheet([
+      { name: '高級腕時計', description: '防水仕様の高級腕時計です', tags: '時計' },
+    ]);
+    // 「防水」しか一致しない無関係な質問ではカードを出さない
+    expect(getRecommendations('防水 の スマホケース は ありますか', data)).toEqual([]);
+  });
+
+  it('should not show cards for an unrelated question', () => {
+    expect(getRecommendations('営業時間を教えてください', coffeeShop)).toEqual([]);
+  });
+
+  it('should show only products mentioned in the assistant response', () => {
+    // クエリ自体に商品キーワードがなくても、AIが実際に勧めた商品はカードにする
+    const results = getRecommendations('何かおすすめはありますか', coffeeShop, {
+      responseText: '当店自慢のブレンドコーヒーはいかがでしょうか。',
+    });
+    expect(results.map((p) => p.name)).toEqual(['ブレンドコーヒー']);
+  });
+
+  it('should match curated tags inside unsegmented Japanese queries', () => {
+    // 分かち書きされない日本語でもタグ（タグ⊆発話）で照合できる
+    const results = getRecommendations('コーヒーはありますか', coffeeShop);
+    expect(results.map((p) => p.name)).toEqual(['ブレンドコーヒー']);
+  });
+
+  it('should show a product whose name appears in the user message', () => {
+    const results = getRecommendations('抹茶ラテの値段を教えて', coffeeShop);
+    expect(results.map((p) => p.name)).toEqual(['抹茶ラテ']);
+  });
+
+  it('should show products matching multiple description keywords', () => {
+    const data = makeProductSheet([
+      { name: 'トラベルバッグ', description: '軽量で防水の大容量バッグ', tags: '' },
+      { name: '腕時計', description: '防水仕様', tags: '' },
+    ]);
+    // 説明文に複数の具体語が一致する商品は関連ありとみなす
+    const results = getRecommendations('軽量 で 防水 の かばん', data);
+    expect(results.map((p) => p.name)).toEqual(['トラベルバッグ']);
+  });
+
+  it('should not count duplicated query tokens as multiple hits', () => {
+    const data = makeProductSheet([
+      { name: '腕時計', description: '防水仕様のモデル', tags: '' },
+    ]);
+    // 同じ語の繰り返しは「複数語一致」の根拠にしない
+    expect(getRecommendations('防水 防水 ケース', data)).toEqual([]);
   });
 });
