@@ -193,13 +193,42 @@ Terraformを使用してデプロイします。本システムは、複数の�
    }
    ```
 
-3. **Terraformの適用**:
+   API キーは `terraform.tfvars` に書きません。Terraform に値を渡すと state ファイルに平文で保存されるため、次の手順で Secret Manager に直接登録します。
+
+3. **Secret の作成と API キーの登録**:
+   まず Secret の箱だけを作ります。
    ```bash
    cd terraform
    terraform init
+   terraform apply \
+     -target=google_secret_manager_secret.server_secrets \
+     -target=google_secret_manager_secret_iam_member.server_secret_accessor
+   ```
+   出力された `secret_ids` の各 Secret に、API キーを登録します。キーはシェル履歴に残らないよう標準入力から渡してください。
+   ```bash
+   # Makaseteサーバーごとに実行（server-1 は makasete_servers のキー）
+   printf '%s' "$GEMINI_API_KEY" | gcloud secrets versions add makasete-ai-server-1-gemini-api-key --data-file=-
+
+   # tts_provider = "elevenlabs" の場合のみ
+   printf '%s' "$ELEVENLABS_API_KEY" | gcloud secrets versions add makasete-ai-server-1-elevenlabs-api-key --data-file=-
+   ```
+   キーを変更したいときも同じコマンドで新しいバージョンを追加します。Cloud Run は `latest` を参照するため、次のデプロイから反映されます。
+
+4. **Terraformの適用**:
+   ```bash
    terraform apply
    ```
    実行後、各Makaseteサーバーの URL および **Cloud Build トリガーID** が出力されます。このトリガーIDを後述のGAS設定で使用します。
+
+### 既存環境からの移行（API キーを tfvars に書いていた場合）
+
+以前の構成では API キーを `terraform.tfvars` に書き、Cloud Run の環境変数へ平文で渡していました。移行時は次の手順を踏んでください。
+
+1. 上記の手順 3 で Secret を作り、API キーを登録する。
+2. `terraform.tfvars` の `makasete_servers` から `gemini_api_key` と `elevenlabs_api_key` を削除する（残っていても無視されますが、ファイルには平文で残ります）。
+3. `terraform apply` で Cloud Run の環境変数を Secret 参照に切り替える。
+4. **API キーをローテーションする。** 旧キーは `terraform.tfstate` とそのバックアップ、Cloud Run の過去のリビジョンに平文で残っています。Google AI Studio と ElevenLabs で新しいキーを発行して手順 3 と同じ方法で登録し、旧キーを無効化してください。
+5. 旧キーを含む `terraform.tfstate.backup` を削除する。
 
 ## スプレッドシート連携 (GAS)
 

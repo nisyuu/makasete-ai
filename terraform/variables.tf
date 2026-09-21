@@ -16,17 +16,15 @@ variable "container_image" {
 
 variable "makasete_servers" {
   type = map(object({
-    google_sheets_id   = string
-    gemini_api_key     = string
-    elevenlabs_api_key = optional(string, "")
+    google_sheets_id = string
   }))
   description = <<-EOT
     Map of Makasete-server configurations. The key will be used as the service name suffix.
 
-    API キーは Secret Manager のシークレットとして保管され、Cloud Run には参照だけが
-    渡される。secret_data はプロバイダのスキーマ上 sensitive 扱いのため、plan 出力には
-    現れない。変数全体に sensitive = true を付けると for_each のキーに使えなくなるため、
-    ここでは付けていない。
+    API キーはここに書かない。Terraform に値を渡すと state に平文で保存されるため、
+    Secret Manager に gcloud で直接登録する（リポジトリ直下の README.md「デプロイ」を参照）。
+    古い tfvars に gemini_api_key などが残っていても型変換で黙って捨てられ、
+    state には入らない。ただしファイル自体には平文で残るので削除すること。
   EOT
 }
 

@@ -15,6 +15,7 @@ import { ChatService } from "./services/chat";
 import { isOriginAllowed, parseAllowedOrigins } from "./utils/origin";
 import { resolveClientIp } from "./utils/clientIp";
 import { TokenBucketLimiter } from "./utils/rateLimiter";
+import { installProcessHandlers } from "./utils/processHandlers";
 
 // 設定漏れを起動時に報告する（最初のチャットで初めて気付く事態を避ける）
 const missingConfig = validateConfig();
@@ -244,17 +245,11 @@ io.on("connection", (socket) => {
   });
 });
 
-// Safety net: 想定外の unhandled rejection でプロセスを落とさない。
-// Node 24 の既定は --unhandled-rejections=throw なので、ハンドラが無いと
-// 1 件の reject で全接続が切断される。
-process.on("unhandledRejection", (reason: unknown) => {
-  const message = reason instanceof Error ? reason.message : String(reason);
-  console.error("[Process] Unhandled rejection:", message);
-});
-
-process.on("uncaughtException", (error: Error) => {
-  console.error("[Process] Uncaught exception:", error.message);
-});
+// Safety net: 拾い損ねた Promise の reject ではプロセスを落とさず、
+// 同期処理の途中で突き抜けた例外では接続を閉じてから終了する（Cloud Run が再起動）。
+// 詳細は server/utils/processHandlers.ts を参照。
+// io.close() は接続中のソケットを切断してから内部の httpServer も閉じる。
+installProcessHandlers(process, { server: io });
 
 // Start Server
 const PORT = config.port;

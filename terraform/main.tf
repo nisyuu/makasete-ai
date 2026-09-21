@@ -41,9 +41,10 @@ resource "google_cloud_run_service" "makasete_servers" {
   name     = "makasete-ai-${each.key}"
   location = var.region
 
-  # Secret のバージョンと読み取り権限が揃ってからサービスを作る
+  # 読み取り権限が揃ってからサービスを更新する。Secret の値（バージョン）は
+  # Terraform の外で登録するため、apply 前に登録されている必要がある
+  # （リポジトリ直下の README.md「デプロイ」を参照）。
   depends_on = [
-    google_secret_manager_secret_version.server_secrets,
     google_secret_manager_secret_iam_member.server_secret_accessor,
   ]
 
@@ -70,7 +71,7 @@ resource "google_cloud_run_service" "makasete_servers" {
           }
         }
         dynamic "env" {
-          for_each = each.value.elevenlabs_api_key != "" ? [1] : []
+          for_each = var.tts_provider == "elevenlabs" ? [1] : []
           content {
             name = "ELEVENLABS_API_KEY"
             value_from {
