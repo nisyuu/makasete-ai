@@ -11,7 +11,7 @@ import {
   dataReadyPromise,
   isDataReady,
 } from "./services/sheets";
-import { ChatService } from "./services/chat";
+import { ChatService, resolveRequestId } from "./services/chat";
 import { isOriginAllowed, parseAllowedOrigins } from "./utils/origin";
 import { resolveClientIp } from "./utils/clientIp";
 import { TokenBucketLimiter } from "./utils/rateLimiter";
@@ -213,13 +213,23 @@ io.on("connection", (socket) => {
 
   socket.on(
     "user-input",
-    (data: { text: string; isVoiceInput: boolean; language?: string }) => {
+    (data: {
+      text: string;
+      isVoiceInput: boolean;
+      language?: string;
+      requestId?: unknown;
+    }) => {
       if (
         !socketEventLimiter.tryConsume(socket.id) ||
         !ipEventLimiter.tryConsume(clientIp)
       ) {
+        const requestId =
+          data !== null && typeof data === "object"
+            ? resolveRequestId(data.requestId)
+            : undefined;
         socket.emit("error", {
           message: "Too many requests. Please wait a moment and try again.",
+          ...(requestId === undefined ? {} : { requestId }),
         });
         return;
       }
@@ -235,6 +245,8 @@ io.on("connection", (socket) => {
   );
 
   socket.on("disconnect", () => {
+    // 聞き手がいなくなった生成を打ち切り、Gemini の課金を止める
+    chatService.dispose();
     socketEventLimiter.release(socket.id);
     const count = socketConnections.get(clientIp);
     if (count && count > 1) {

@@ -77,7 +77,11 @@ export async function generateResponseStream(
     allData: Map<string, SheetData[]>,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     history: any[] = [],
-    language = "ja"
+    language = "ja",
+    // 新しい入力で割り込まれたときに生成を打ち切るためのシグナル。
+    // for await を break するだけでは受信を止めるだけで、Gemini 側の生成は
+    // 最後まで続いてトークンが課金される。fetch ごと中断して課金を止める。
+    signal?: AbortSignal
 ) {
     if (!model) {
         initGemini();
@@ -103,7 +107,9 @@ export async function generateResponseStream(
             ]
         });
 
-        const result = await chat.sendMessageStream(prompt);
+        const result = signal
+            ? await chat.sendMessageStream(prompt, { signal })
+            : await chat.sendMessageStream(prompt);
         return result.stream;
     } catch (e: unknown) {
         const message = e instanceof Error ? e.message : String(e);

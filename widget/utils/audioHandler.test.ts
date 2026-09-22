@@ -52,6 +52,10 @@ class MockAudioContext {
         this.state = 'running';
     });
     close = vi.fn(async () => {});
+    constructor() {
+        // テストから生成されたコンテキストの状態を操作できるようにする
+        (window as unknown as { __lastCtx?: MockAudioContext }).__lastCtx = this;
+    }
 }
 
 // --- SpeechRecognition モック ---
@@ -183,6 +187,71 @@ describe('initAudioHandler', () => {
             await flush();
             handler.resetAudioState();
             expect(createdSources[0].stop).toHaveBeenCalled();
+        });
+
+        it('should not play a chunk whose decode finishes after a reset', async () => {
+            // decode 待ちの間に新しいメッセージを送る（リセットされる）と、
+            // 古い音声が decode 完了後に鳴って新しい音声と重なっていた。
+            const { handler } = setup();
+            handler.handleAudioChunk(new ArrayBuffer(2)); // 古い応答（decode 中）
+            handler.resetAudioState(); // 新しいメッセージを送信
+            await flush();
+            expect(createdSources).toHaveLength(0);
+        });
+
+        it('should play the new response alone after a reset during decode', async () => {
+            const { handler } = setup();
+            handler.handleAudioChunk(new ArrayBuffer(2)); // 古い応答（decode 中）
+            handler.resetAudioState();
+            handler.handleAudioChunk(new ArrayBuffer(4)); // 新しい応答
+            await flush();
+            await flush();
+            // 鳴るのは新しい応答の 1 本だけで、同時に 2 本は鳴らない
+            expect(createdSources).toHaveLength(1);
+            expect(createdSources[0].start).toHaveBeenCalledTimes(1);
+        });
+
+        it('should keep the queue working after a stale decode is dropped', async () => {
+            const { handler } = setup();
+            handler.handleAudioChunk(new ArrayBuffer(2));
+            handler.resetAudioState();
+            await flush();
+
+            handler.handleAudioChunk(new ArrayBuffer(2));
+            await flush();
+            expect(createdSources).toHaveLength(1);
+
+            // 1 本目の再生が終われば、次のチャンクも再生される
+            handler.handleAudioChunk(new ArrayBuffer(2));
+            createdSources[0].onended?.();
+            await flush();
+            expect(createdSources).toHaveLength(2);
+        });
+    });
+
+    describe('AudioContext state recovery', () => {
+        it('should resume an iOS "interrupted" context', async () => {
+            // iOS Safari は着信や Siri の後に "interrupted" になる。
+            // "suspended" しか見ていないと復帰できず、読み上げが無音になる。
+            const { handler } = setup();
+            handler.initAudioContext();
+            await handler.resumeAudioContext();
+            const ctx = (window as unknown as { __lastCtx?: MockAudioContext }).__lastCtx;
+            expect(ctx).toBeDefined();
+
+            (ctx as unknown as { state: string }).state = 'interrupted';
+            ctx!.resume.mockClear();
+            await handler.resumeAudioContext();
+            expect(ctx!.resume).toHaveBeenCalledTimes(1);
+        });
+
+        it('should not try to resume a closed context', async () => {
+            const { handler } = setup();
+            handler.initAudioContext();
+            const ctx = (window as unknown as { __lastCtx?: MockAudioContext }).__lastCtx;
+            (ctx as unknown as { state: string }).state = 'closed';
+            await handler.resumeAudioContext();
+            expect(ctx!.resume).not.toHaveBeenCalled();
         });
     });
 
