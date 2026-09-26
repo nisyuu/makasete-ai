@@ -43,3 +43,30 @@ variable "github_repository" {
   type        = string
   description = "The GitHub repository in the format owner/name (e.g., nisyuu/makasete-ai)"
 }
+
+variable "trusted_proxy_count" {
+  type        = number
+  description = <<-EOT
+    このサーバーの前段にあるリバースプロキシの段数。X-Forwarded-For の右から
+    何番目をクライアントの IP として扱うかを決める。Cloud Run に直接つなぐなら 1、
+    前段に Firebase App Hosting や外部ロードバランサ、CDN があれば 2。
+    実際の構成と合っていないと、全利用者が 1 つのレート制限キーにまとめられ、
+    同時接続や送信回数の枠をサイト全体で共有してしまう。
+    決め方はリポジトリ直下の README.md「プロキシ段数の確認」を参照。
+  EOT
+  default     = 1
+
+  validation {
+    condition     = var.trusted_proxy_count >= 1 && var.trusted_proxy_count <= 10
+    error_message = "trusted_proxy_count は 1 以上 10 以下で指定してください。"
+  }
+}
+
+variable "log_proxy_headers" {
+  type        = bool
+  description = <<-EOT
+    起動後しばらく X-Forwarded-For の形をログに出す。trusted_proxy_count の値を
+    確認するための一時的なスイッチで、確認後は false に戻す。
+  EOT
+  default     = false
+}

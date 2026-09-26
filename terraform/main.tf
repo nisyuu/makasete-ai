@@ -90,6 +90,17 @@ resource "google_cloud_run_service" "makasete_servers" {
           name  = "TTS_PROVIDER"
           value = var.tts_provider
         }
+        # 前段のプロキシ段数。実際の構成と合っていないと全利用者が 1 つの
+        # レート制限キーにまとめられる。決め方はリポジトリ直下の README.md
+        # 「プロキシ段数の確認」を参照。
+        env {
+          name  = "TRUSTED_PROXY_COUNT"
+          value = tostring(var.trusted_proxy_count)
+        }
+        env {
+          name  = "LOG_PROXY_HEADERS"
+          value = tostring(var.log_proxy_headers)
+        }
 
         resources {
           limits = {
