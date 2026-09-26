@@ -30,9 +30,8 @@ const ICON_AUDIO_OFF = `<svg class="lucide lucide-volume-x" viewBox="0 0 24 24" 
 /**
  * 属性値として安全な形にエスケープする。
  *
- * placeholder や helperText は今のところコード内の既定値だが、将来 settings
- * シートから流し込む改修が入ると、テンプレートリテラル経由でそのまま
- * innerHTML に渡るため属性を抜け出して XSS になる。入口で常にエスケープしておく。
+ * placeholder や helperText は今のところコード内の既定値だが、将来 settings シートから流し込む改修が入ると、テンプレートリテラル経由でそのまま innerHTML に渡るため属性を抜け出して XSS になる。
+ * 入口で常にエスケープしておく。
  */
 function escapeAttribute(value: string): string {
   return value.replace(
@@ -51,9 +50,8 @@ function escapeAttribute(value: string): string {
 /**
  * Shadow Root にウィジェットの CSS を適用する。
  *
- * Constructable Stylesheet を優先し、非対応ブラウザや失敗時のみ <style> 要素へ
- * フォールバックする。CSP の `style-src` にインラインが許可されていない
- * 埋め込み先でもスタイルが落ちないようにするため。
+ * Constructable Stylesheet を優先し、非対応ブラウザや失敗時のみ <style> 要素へフォールバックする。
+ * CSP の `style-src` にインラインが許可されていない埋め込み先でもスタイルが落ちないようにするため。
  */
 function applyWidgetStyles(shadow: ShadowRoot): void {
   if (typeof CSSStyleSheet === "function" && "adoptedStyleSheets" in shadow) {
@@ -144,10 +142,9 @@ export function initChatWidget(config: WidgetConfig = {}): void {
   document.body.appendChild(host);
   const shadow = host.attachShadow({ mode: "open" });
 
-  // 埋め込み先が `style-src 'self'` のような CSP を設定していると、<style> 要素の
-  // インライン CSS はブロックされ、ウィジェットが素の HTML として表示される。
-  // Constructable Stylesheet（adoptedStyleSheets）は CSSOM 経由なので CSP の
-  // インライン制限を受けない。非対応ブラウザだけ従来の <style> にフォールバックする。
+  // 埋め込み先が `style-src 'self'` のような CSP を設定していると、<style> 要素のインライン CSS はブロックされ、ウィジェットが素の HTML として表示される。
+  // Constructable Stylesheet（adoptedStyleSheets）は CSSOM 経由なので CSP のインライン制限を受けない。
+  // 非対応ブラウザだけ従来の <style> にフォールバックする。
   applyWidgetStyles(shadow);
 
   const wrapper = document.createElement("div");
@@ -160,9 +157,8 @@ export function initChatWidget(config: WidgetConfig = {}): void {
   const els = getUIElements(shadow);
   els.chatTitle.textContent = title;
 
-  // 送信ボタンの初期状態（入力が空なので非表示）。マークアップに
-  // style="display: none" を書くと CSP の style-src で落ちる環境があるため、
-  // CSSOM 経由で設定する。
+  // 送信ボタンの初期状態（入力が空なので非表示）。
+  // マークアップに style="display: none" を書くと CSP の style-src で落ちる環境があるため、CSSOM 経由で設定する。
   updateInputActions(els.input, els.sendBtn, els.micBtn);
 
   const messageState: MessageState = { currentMakaseteServerMessageRaw: "" };

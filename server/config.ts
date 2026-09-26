@@ -65,9 +65,9 @@ export const config = {
      * 信頼するリバースプロキシの段数。
      *
      * X-Forwarded-For の右から何番目をクライアントの IP として扱うかを決める。
-     * Cloud Run に直接つなぐ構成なら 1。Firebase App Hosting や外部ロード
-     * バランサを前段に置くと XFF が「client, LB」の形になり、1 のままでは
-     * LB の IP を全利用者のキーにしてしまう。その場合は 2 にする。
+     * Cloud Run に直接つなぐ構成なら 1。
+     * Firebase App Hosting や外部ロードバランサを前段に置くと XFF が「client, LB」の形になり、1 のままでは LB の IP を全利用者のキーにしてしまう。
+     * その場合は 2 にする。
      * 実際の値は LOG_PROXY_HEADERS=true で本番のヘッダを確認して決める。
      */
     trustedProxyCount: resolveIntEnv(
@@ -81,9 +81,8 @@ export const config = {
     /**
      * 同一クライアントからの同時接続数の上限。
      *
-     * プロキシ段数の設定を誤ると全利用者が 1 つのキーにまとめられるため、
-     * ここを小さくしすぎると「6 人目以降が接続できない」形でサイト全体が
-     * 止まる。費用の歯止めは下の同時生成数で行い、ここは緩めにする。
+     * プロキシ段数の設定を誤ると全利用者が 1 つのキーにまとめられるため、ここを小さくしすぎると「6 人目以降が接続できない」形でサイト全体が止まる。
+     * 費用の歯止めは下の同時生成数で行い、ここは緩めにする。
      */
     maxConnectionsPerClient: resolveIntEnv(
         'MAX_CONNECTIONS_PER_CLIENT',
@@ -96,8 +95,8 @@ export const config = {
     /**
      * プロセス全体で同時に走らせる応答生成の上限。
      *
-     * IP 単位の制限がどう転んでも、LLM と TTS の同時呼び出し数はここで
-     * 頭打ちになる。クライアントの識別に頼らない歯止めとして置く。
+     * IP 単位の制限がどう転んでも、LLM と TTS の同時呼び出し数はここで頭打ちになる。
+     * クライアントの識別に頼らない歯止めとして置く。
      */
     maxConcurrentGenerations: resolveIntEnv(
         'MAX_CONCURRENT_GENERATIONS',
@@ -110,8 +109,8 @@ export const config = {
     /**
      * プロキシ関連のヘッダを起動後しばらくログに出す。
      *
-     * 本番の X-Forwarded-For の形を確認して trustedProxyCount を決めるための
-     * 一時的なスイッチ。既定は無効。
+     * 本番の X-Forwarded-For の形を確認して trustedProxyCount を決めるための一時的なスイッチ。
+     * 既定は無効。
      */
     logProxyHeaders: resolveBoolEnv(process.env.LOG_PROXY_HEADERS),
 };
@@ -119,9 +118,8 @@ export const config = {
 /**
  * 起動時に必須の環境変数を検証する。
  *
- * これまで設定漏れは起動時には何も起きず、最初のチャットで
- * 「Internal server error」として初めて表面化していた。原因の切り分けに時間が
- * かかるうえ、壊れたインスタンスに Cloud Run がトラフィックを流してしまう。
+ * これまで設定漏れは起動時には何も起きず、最初のチャットで「Internal server error」として初めて表面化していた。
+ * 原因の切り分けに時間がかかるうえ、壊れたインスタンスに Cloud Run がトラフィックを流してしまう。
  * 不足しているものを起動時にまとめて報告する。
  *
  * @returns 不足している必須変数の名前（すべて揃っていれば空配列）

@@ -41,9 +41,8 @@ export class GeminiTTSService implements TTSService {
     // low-latency real-time synthesis. Voice names are shared across locales
     // in the <locale>-Chirp3-HD-<voice> format. "Aoede" is a bright, friendly
     // voice that fits customer-support / help-desk / FAQ use cases.
-    // Object.create(null) でプロトタイプ経由の参照（language="constructor" など）を
-    // 塞ぐ。通常のリテラルだと未知のキーで Object 由来の値が返り、`??` の
-    // フォールバックが働かないまま不正な voice 指定として API に送られてしまう。
+    // Object.create(null) でプロトタイプ経由の参照（language="constructor" など）を塞ぐ。
+    // 通常のリテラルだと未知のキーで Object 由来の値が返り、`??` のフォールバックが働かないまま不正な voice 指定として API に送られてしまう。
     private static readonly VOICES: Record<string, texttospeech_v1.Schema$VoiceSelectionParams> = Object.assign(
         Object.create(null),
         {

@@ -2,11 +2,8 @@
  * クライアント単位の同時接続数を数える。
  *
  * 数え上げを「加算」と「解放」の対で扱い、解放は必ず一度だけ行われるようにする。
- * Socket.IO のミドルウェアで加算し、disconnect で減算する素朴な実装だと、
- * ミドルウェアを通った直後に接続が閉じた場合に connection も disconnect も
- * 発火せず（socket.io は readyState を見て socket を捨てる）、加算した分が
- * 永久に残る。数回繰り返すだけでその IP は接続できなくなるため、
- * 解放は呼び出し側が受け取る関数に閉じ込める。
+ * Socket.IO のミドルウェアで加算し、disconnect で減算する素朴な実装だと、ミドルウェアを通った直後に接続が閉じた場合に connection も disconnect も発火せず（socket.io は readyState を見て socket を捨てる）、加算した分が永久に残る。
+ * 数回繰り返すだけでその IP は接続できなくなるため、解放は呼び出し側が受け取る関数に閉じ込める。
  */
 export class ConnectionCounter {
   private readonly counts = new Map<string, number>();
@@ -14,7 +11,8 @@ export class ConnectionCounter {
   constructor(private readonly limit: number) {}
 
   /**
-   * 1 接続ぶん数える。上限に達していれば null を返す。
+   * 1 接続ぶん数える。
+   * 上限に達していれば null を返す。
    * 戻り値の関数を呼ぶと解放する（複数回呼んでも二重に減らない）。
    */
   acquire(key: string): (() => void) | null {

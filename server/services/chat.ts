@@ -27,9 +27,9 @@ export class ChatService {
     socket: Socket,
     data: { text: string; isVoiceInput: boolean; language?: string },
   ): Promise<void> {
-    // ペイロードを信用しない。null / undefined / プリミティブを分割代入すると
-    // TypeError で Promise が reject し、呼び出し側が拾い損ねるとプロセスごと
-    // 落ちる。クライアントは誰でも任意のペイロードを送れるので必ず検証する。
+    // ペイロードを信用しない。
+    // null / undefined / プリミティブを分割代入すると TypeError で Promise が reject し、呼び出し側が拾い損ねるとプロセスごと落ちる。
+    // クライアントは誰でも任意のペイロードを送れるので必ず検証する。
     if (data === null || typeof data !== "object") {
       socket.emit("error", { message: "Input is invalid" });
       return;
@@ -82,10 +82,8 @@ export class ChatService {
               // Superseded by a newer input: discard the buffered audio without
               // emitting it. Resuming with no data listener drains and drops it.
               //
-              // 'error' リスナーを必ず先に付ける。ElevenLabs のストリームは
-              // resume 後に下流の fetch が失敗すると 'error' を emit し、
-              // リスナーが無い Readable の 'error' は uncaughtException になって
-              // プロセスを落とす。
+              // 'error' リスナーを必ず先に付ける。
+              // ElevenLabs のストリームは resume 後に下流の fetch が失敗すると 'error' を emit し、リスナーが無い Readable の 'error' は uncaughtException になってプロセスを落とす。
               return streamPromise
                 .then((s) => {
                   if (!s) return;
@@ -225,11 +223,9 @@ export class ChatService {
 
   // Prepares the TTS input string, applying SSML pause tuning for Google TTS.
   private prepareTTSInput(sentence: string, ttsProviderName: string): string | null {
-    // すでに SSML として組み立てられた文だけを素通しする。`hasTags` は
-    // `<[^>]*>` に一致するだけなので、LLM が出力した「A<B>C」や「<br>」でも真に
-    // なり、無エスケープのまま <speak> に包まれて TTS の SSML パースエラーを招く
-    // （その文だけ音声が無言になる）。先頭が <speak> の場合に限定し、それ以外は
-    // 必ずエスケープ経路へ送る。
+    // すでに SSML として組み立てられた文だけを素通しする。
+    // `hasTags` は `<[^>]*>` に一致するだけなので、LLM が出力した「A<B>C」や「<br>」でも真になり、無エスケープのまま <speak> に包まれて TTS の SSML パースエラーを招く（その文だけ音声が無言になる）。
+    // 先頭が <speak> の場合に限定し、それ以外は必ずエスケープ経路へ送る。
     if (isSsml(sentence) && hasTags(sentence)) {
       const innerText = sentence.replace(/<\/?speak>/g, "").trim();
       const ssmlContent = removeMarkdownLinks(innerText);

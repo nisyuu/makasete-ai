@@ -190,9 +190,8 @@ export function applyPrimaryColor(
   shadowRoot: ShadowRoot,
   color: string,
 ): void {
-  // settings シートの値をそのまま流し込むと、不正値や url(...) のような指定で
-  // ボタンの背景が消えるなど表示が崩れる。CSSOM 経由なので宣言の外へは
-  // 出られないが、色として解釈できる値だけを通す。
+  // settings シートの値をそのまま流し込むと、不正値や url(...) のような指定でボタンの背景が消えるなど表示が崩れる。
+  // CSSOM 経由なので宣言の外へは出られないが、色として解釈できる値だけを通す。
   if (
     typeof CSS !== "undefined" &&
     typeof CSS.supports === "function" &&
