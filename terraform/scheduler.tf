@@ -15,10 +15,16 @@ resource "google_service_account" "workflow_sa" {
   display_name = "Makasete AI Cloud Run Scaler Workflow Service Account"
 }
 
-resource "google_project_iam_member" "workflow_run_admin" {
-  project = var.project_id
-  role    = "roles/run.developer"
-  member  = "serviceAccount:${google_service_account.workflow_sa.email}"
+# Security: min-instances を変更したいのは自分たちの Cloud Run サービスだけ。
+# プロジェクトレベルの run.developer は他の全サービスも書き換えられるため、
+# 対象サービスごとの IAM に絞る。
+resource "google_cloud_run_service_iam_member" "workflow_run_developer" {
+  for_each = var.makasete_servers
+  location = google_cloud_run_service.makasete_servers[each.key].location
+  project  = google_cloud_run_service.makasete_servers[each.key].project
+  service  = google_cloud_run_service.makasete_servers[each.key].name
+  role     = "roles/run.developer"
+  member   = "serviceAccount:${google_service_account.workflow_sa.email}"
 }
 
 resource "google_project_iam_member" "workflow_logging" {

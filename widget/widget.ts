@@ -6,6 +6,7 @@ import {
   getUIElements,
   updateInputActions,
   showTypingIndicator,
+  hideTypingIndicator,
   appendMessage,
   appendRecommendations,
   applyPrimaryColor,
@@ -27,8 +28,53 @@ const ICON_AUDIO_ON = `<svg class="lucide lucide-volume-2" viewBox="0 0 24 24" f
 /** 音声読み上げ OFF（ミュート）アイコン */
 const ICON_AUDIO_OFF = `<svg class="lucide lucide-volume-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="22" x2="16" y1="9" y2="15"/><line x1="16" x2="22" y1="9" y2="15"/></svg>`;
 
+/**
+ * 属性値として安全な形にエスケープする。
+ *
+ * placeholder や helperText は今のところコード内の既定値だが、将来 settings シートから流し込む改修が入ると、テンプレートリテラル経由でそのまま innerHTML に渡るため属性を抜け出して XSS になる。
+ * 入口で常にエスケープしておく。
+ */
+function escapeAttribute(value: string): string {
+  return value.replace(
+    /[&<>"']/g,
+    (char) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      })[char] || char,
+  );
+}
+
+/**
+ * Shadow Root にウィジェットの CSS を適用する。
+ *
+ * Constructable Stylesheet を優先し、非対応ブラウザや失敗時のみ <style> 要素へフォールバックする。
+ * CSP の `style-src` にインラインが許可されていない埋め込み先でもスタイルが落ちないようにするため。
+ */
+function applyWidgetStyles(shadow: ShadowRoot): void {
+  if (typeof CSSStyleSheet === "function" && "adoptedStyleSheets" in shadow) {
+    try {
+      const sheet = new CSSStyleSheet();
+      sheet.replaceSync(widgetStyles);
+      shadow.adoptedStyleSheets = [...shadow.adoptedStyleSheets, sheet];
+      return;
+    } catch {
+      // replaceSync 非対応などの場合は <style> にフォールバックする
+    }
+  }
+
+  const style = document.createElement("style");
+  style.textContent = widgetStyles;
+  shadow.appendChild(style);
+}
+
 /** ウィジェットのリッチUIマークアップ（ランチャーボタン・チャットウィンドウ等） */
 function buildWidgetMarkup(placeholder: string, helperText: string): string {
+  const safePlaceholder = escapeAttribute(placeholder);
+  const safeHelperText = escapeAttribute(helperText);
   return `
     <div class="widget-container">
       <div class="chat-window">
@@ -46,14 +92,14 @@ function buildWidgetMarkup(placeholder: string, helperText: string): string {
         <div class="chat-timeline"></div>
         <div class="input-area">
           <div class="input-wrapper">
-            <textarea class="text-input" placeholder="${placeholder}" rows="1"></textarea>
-            <div class="input-helper">${helperText}</div>
+            <textarea class="text-input" placeholder="${safePlaceholder}" rows="1"></textarea>
+            <div class="input-helper">${safeHelperText}</div>
           </div>
           <div class="input-actions">
             <button class="btn mic-btn" title="音声入力">
               <svg class="lucide lucide-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
             </button>
-            <button class="btn send-btn" title="送信" style="display: none;">
+            <button class="btn send-btn" title="送信">
               <svg class="lucide lucide-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
             </button>
           </div>
@@ -97,9 +143,10 @@ export function initChatWidget(config: WidgetConfig = {}): void {
   document.body.appendChild(host);
   const shadow = host.attachShadow({ mode: "open" });
 
-  const style = document.createElement("style");
-  style.textContent = widgetStyles;
-  shadow.appendChild(style);
+  // 埋め込み先が `style-src 'self'` のような CSP を設定していると、<style> 要素のインライン CSS はブロックされ、ウィジェットが素の HTML として表示される。
+  // Constructable Stylesheet（adoptedStyleSheets）は CSSOM 経由なので CSP のインライン制限を受けない。
+  // 非対応ブラウザだけ従来の <style> にフォールバックする。
+  applyWidgetStyles(shadow);
 
   const wrapper = document.createElement("div");
   wrapper.innerHTML = buildWidgetMarkup(placeholder, helperText);
@@ -110,6 +157,10 @@ export function initChatWidget(config: WidgetConfig = {}): void {
 
   const els = getUIElements(shadow);
   els.chatTitle.textContent = title;
+
+  // 送信ボタンの初期状態（入力が空なので非表示）。
+  // マークアップに style="display: none" を書くと CSP の style-src で落ちる環境があるため、CSSOM 経由で設定する。
+  updateInputActions(els.input, els.sendBtn, els.micBtn);
 
   const messageState: MessageState = { currentMakaseteServerMessageRaw: "" };
 
@@ -223,7 +274,9 @@ export function initChatWidget(config: WidgetConfig = {}): void {
       );
     },
     onResponseComplete: () => {
-      els.input.focus();
+      // 応答が 1 文字も無いまま完了した場合でも、インジケータを残さない
+      hideTypingIndicator(els.timeline);
+      focusInputIfAppropriate();
     },
     onRecommendation: (products) => {
       appendRecommendations(els.timeline, products);
@@ -231,7 +284,36 @@ export function initChatWidget(config: WidgetConfig = {}): void {
     onConnect: () => {
       console.log("[MakaseteAI] Connected");
     },
+    onConnectionLost: (reason) => {
+      audio.resetAudioState();
+      const message =
+        reason === "connect-timeout"
+          ? isEn
+            ? "Could not connect to the server. Please check your connection and try again."
+            : "サーバーに接続できませんでした。通信環境を確認して、もう一度お試しください。"
+          : isEn
+            ? "The connection was lost. Please send your message again."
+            : "接続が切れました。お手数ですが、もう一度送信してください。";
+      // appendMessage はサーバー側の発言を追加するときにインジケータも消す
+      appendMessage(els.timeline, messageState, "makasete-server", message);
+    },
   });
+
+  /**
+   * 応答完了時に入力欄へフォーカスを戻す。ただし、ユーザーがホストページの
+   * 別の入力欄で作業していたらフォーカスを奪わない。タッチ端末ではフォーカス
+   * するとソフトキーボードが開いてしまうので戻さない。
+   */
+  function focusInputIfAppropriate(): void {
+    if (!els.chatWindow.classList.contains("open")) return;
+    // Shadow DOM 内の要素がフォーカスされていると document.activeElement は host になる
+    if (document.activeElement !== host) return;
+    const isTouch =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(pointer: coarse)").matches;
+    if (isTouch) return;
+    els.input.focus();
+  }
 
   // --- Send ---
   function sendMessage(isVoiceInput = false): void {
@@ -245,8 +327,10 @@ export function initChatWidget(config: WidgetConfig = {}): void {
     updateInputActions(els.input, els.sendBtn, els.micBtn);
     showTypingIndicator(els.timeline);
 
+    // 新しい質問を送ったら、前の応答の読み上げは止める（割り込み）。
+    // テキスト入力で送った場合も、前の応答の音声が鳴り続けないようにする。
+    audio.resetAudioState();
     if (useAudio) {
-      audio.resetAudioState();
       audio.resumeAudioContext().catch(console.error);
     }
 
@@ -304,27 +388,49 @@ export function initChatWidget(config: WidgetConfig = {}): void {
   // 初期表示（アイコン・タイトル）を状態に合わせて設定する
   updateAudioToggle();
 
+  // モバイルで開いている間は、ホストページの body のスクロールを止める。
+  // 開く前の値を覚えておき、閉じるときは画面幅に関係なく必ずその値に戻す。
+  // 開いた後に回転や拡大で幅が変わっても、スクロールが止まったまま
+  // 残らないようにするため。null はロックしていない状態を表す。
+  let savedBodyOverflow: string | null = null;
+
+  function lockBodyScroll(): void {
+    if (savedBodyOverflow !== null) return;
+    if (window.innerWidth > 600) return;
+    savedBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+  }
+
+  function unlockBodyScroll(): void {
+    if (savedBodyOverflow === null) return;
+    document.body.style.overflow = savedBodyOverflow;
+    savedBodyOverflow = null;
+  }
+
+  function openChatWindow(): void {
+    els.chatWindow.classList.add("open");
+    lockBodyScroll();
+    audio.resumeAudioContext().catch(console.error);
+  }
+
+  function closeChatWindow(): void {
+    els.chatWindow.classList.remove("open");
+    unlockBodyScroll();
+    audio.resetAudioState();
+  }
+
   els.launcherBtn.addEventListener("click", () => {
     if (isDragging) return; // ドラッグ中はトグルしない
-    const isOpen = els.chatWindow.classList.toggle("open");
-
-    // モバイルでは開いている間 body のスクロールを止める
-    if (window.innerWidth <= 600) {
-      document.body.style.overflow = isOpen ? "hidden" : "";
-    }
-
-    if (isOpen) {
-      audio.resumeAudioContext().catch(console.error);
+    if (els.chatWindow.classList.contains("open")) {
+      closeChatWindow();
     } else {
-      audio.resetAudioState();
+      openChatWindow();
     }
   });
 
   if (els.closeBtn) {
     els.closeBtn.addEventListener("click", () => {
-      els.chatWindow.classList.remove("open");
-      document.body.style.overflow = "";
-      audio.resetAudioState();
+      closeChatWindow();
     });
   }
 

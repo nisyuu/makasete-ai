@@ -1,17 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Readable } from 'stream';
 
-const { getAllSheetData, generateResponseStream, generateSpeechStream, getTTSService } = vi.hoisted(() => {
+const { getAllSheetData, getInternalSheetData, generateResponseStream, generateSpeechStream, getTTSService } = vi.hoisted(() => {
     const generateSpeechStream = vi.fn();
     return {
         getAllSheetData: vi.fn(),
+        getInternalSheetData: vi.fn(),
         generateResponseStream: vi.fn(),
         generateSpeechStream,
         getTTSService: vi.fn(() => ({ generateSpeechStream, getName: (): string => 'mock' })),
     };
 });
 
-vi.mock('./sheets', () => ({ getAllSheetData }));
+vi.mock('./sheets', () => ({ getAllSheetData, getInternalSheetData }));
 vi.mock('./gemini', () => ({ generateResponseStream }));
 vi.mock('./tts/factory', () => ({ getTTSService }));
 
@@ -38,6 +39,8 @@ describe('ChatService', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         getAllSheetData.mockReturnValue(new Map());
+        // settings シート未設定時はカード表示が有効（既定値）になる
+        getInternalSheetData.mockReturnValue(new Map());
         // 各呼び出しで新しいストリームを返す（消費済みストリームの再利用を防ぐ）
         generateSpeechStream.mockImplementation(() => Promise.resolve(Readable.from([Buffer.from('A')])));
     });
@@ -96,7 +99,109 @@ describe('ChatService', () => {
             const socket = makeSocket();
             const svc = new ChatService();
             await svc.handleUserInput(socket as never, { text: 'hi', isVoiceInput: false });
-            expect(generateResponseStream).toHaveBeenCalledWith('hi', expect.any(Map), expect.any(Array), 'ja');
+            expect(generateResponseStream).toHaveBeenCalledWith(
+                'hi',
+                expect.any(Map),
+                expect.any(Array),
+                'ja',
+                expect.any(AbortSignal),
+            );
+        });
+    });
+
+    describe('history sent to Gemini', () => {
+        it('should not include the current utterance in the history (it is sent as the prompt)', async () => {
+            // 今回の発話を履歴にも含めると、sendMessageStream(prompt) と合わせて
+            // 同じ発話が 2 回 Gemini に送られ、入力トークンが倍になる。
+            generateResponseStream.mockResolvedValueOnce(makeStream(['一回目の応答。']));
+            generateResponseStream.mockResolvedValueOnce(makeStream(['二回目の応答。']));
+            const socket = makeSocket();
+            const svc = new ChatService();
+
+            await svc.handleUserInput(socket as never, { text: 'first', isVoiceInput: false });
+            await svc.handleUserInput(socket as never, { text: 'second', isVoiceInput: false });
+
+            const firstHistory = generateResponseStream.mock.calls[0][2];
+            expect(firstHistory).toEqual([]);
+
+            const secondHistory = generateResponseStream.mock.calls[1][2];
+            expect(secondHistory).toEqual([
+                { role: 'user', parts: [{ text: 'first' }] },
+                { role: 'model', parts: [{ text: '一回目の応答。' }] },
+            ]);
+            expect(generateResponseStream.mock.calls[1][0]).toBe('second');
+        });
+
+        it('should drop the user turn from history when generation fails', async () => {
+            const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+            generateResponseStream.mockRejectedValueOnce(new Error('boom'));
+            generateResponseStream.mockResolvedValueOnce(makeStream(['応答。']));
+            const socket = makeSocket();
+            const svc = new ChatService();
+
+            await svc.handleUserInput(socket as never, { text: 'failed', isVoiceInput: false });
+            await svc.handleUserInput(socket as never, { text: 'retry', isVoiceInput: false });
+
+            // 失敗した発話が残っていると user が 2 連続した履歴になる
+            expect(generateResponseStream.mock.calls[1][2]).toEqual([]);
+            errSpy.mockRestore();
+        });
+    });
+
+    describe('requestId echo', () => {
+        it('should echo the requestId on every response event', async () => {
+            generateResponseStream.mockResolvedValue(makeStream(['こんにちは。']));
+            const socket = makeSocket();
+            const svc = new ChatService();
+
+            await svc.handleUserInput(socket as never, {
+                text: 'hi',
+                isVoiceInput: false,
+                requestId: 'r-1',
+            });
+
+            expect(socket.emit).toHaveBeenCalledWith('text-chunk', {
+                content: 'こんにちは。',
+                requestId: 'r-1',
+            });
+            expect(socket.emit).toHaveBeenCalledWith('response-complete', { requestId: 'r-1' });
+        });
+
+        it('should echo the requestId on validation errors', async () => {
+            const socket = makeSocket();
+            const svc = new ChatService();
+
+            await svc.handleUserInput(socket as never, {
+                text: '',
+                isVoiceInput: false,
+                requestId: 'r-2',
+            });
+
+            expect(socket.emit).toHaveBeenCalledWith('error', {
+                message: 'Input is invalid',
+                requestId: 'r-2',
+            });
+        });
+
+        it('should ignore oversized or non-primitive requestIds', async () => {
+            generateResponseStream.mockResolvedValue(makeStream(['x。']));
+            const socket = makeSocket();
+            const svc = new ChatService();
+
+            await svc.handleUserInput(socket as never, {
+                text: 'hi',
+                isVoiceInput: false,
+                requestId: 'a'.repeat(1000),
+            });
+            await svc.handleUserInput(socket as never, {
+                text: 'hi',
+                isVoiceInput: false,
+                requestId: { nested: true },
+            });
+
+            for (const call of socket.emit.mock.calls) {
+                expect(call[1]?.requestId).toBeUndefined();
+            }
         });
     });
 
@@ -241,8 +346,172 @@ describe('ChatService', () => {
         });
     });
 
+    describe('recommendations', () => {
+        const productSheet = new Map([
+            ['products', [
+                { name: 'ブレンドコーヒー', description: '深煎り豆の香り高い一杯', tags: 'コーヒー' },
+                { name: '抹茶ラテ', description: '宇治抹茶を使ったラテ', tags: '抹茶' },
+            ]],
+        ]);
+
+        it('should emit only the products the AI actually mentioned in its answer', async () => {
+            getAllSheetData.mockReturnValue(productSheet);
+            generateResponseStream.mockResolvedValue(makeStream(['おすすめはブレンドコーヒーです。']));
+            const socket = makeSocket();
+            const svc = new ChatService();
+
+            await svc.handleUserInput(socket as never, { text: '何かおすすめはありますか', isVoiceInput: false });
+
+            const rec = socket.emit.mock.calls.find((c) => c[0] === 'recommendation');
+            expect(rec).toBeTruthy();
+            expect(rec![1].products.map((p: { name: string }) => p.name)).toEqual(['ブレンドコーヒー']);
+        });
+
+        it('should not emit recommendations for an unrelated question', async () => {
+            getAllSheetData.mockReturnValue(productSheet);
+            generateResponseStream.mockResolvedValue(makeStream(['営業時間は10時から18時です。']));
+            const socket = makeSocket();
+            const svc = new ChatService();
+
+            await svc.handleUserInput(socket as never, { text: '営業時間を教えてください', isVoiceInput: false });
+
+            const rec = socket.emit.mock.calls.find((c) => c[0] === 'recommendation');
+            expect(rec).toBeUndefined();
+        });
+
+        it('should not emit recommendations when the settings sheet disables cards', async () => {
+            getAllSheetData.mockReturnValue(productSheet);
+            getInternalSheetData.mockReturnValue(new Map([
+                ['settings', [{ key: 'show_product_cards', value: 'off' }]],
+            ]));
+            // AI が商品名に言及する（本来ならカードが出る）ケースでも出さない
+            generateResponseStream.mockResolvedValue(makeStream(['おすすめはブレンドコーヒーです。']));
+            const socket = makeSocket();
+            const svc = new ChatService();
+
+            await svc.handleUserInput(socket as never, { text: '何かおすすめはありますか', isVoiceInput: false });
+
+            const rec = socket.emit.mock.calls.find((c) => c[0] === 'recommendation');
+            expect(rec).toBeUndefined();
+            expect(socket.emit).toHaveBeenCalledWith('response-complete');
+        });
+
+        it('should emit recommendations when the settings sheet enables cards', async () => {
+            getAllSheetData.mockReturnValue(productSheet);
+            getInternalSheetData.mockReturnValue(new Map([
+                ['settings', [{ key: 'show_product_cards', value: 'on' }]],
+            ]));
+            generateResponseStream.mockResolvedValue(makeStream(['おすすめはブレンドコーヒーです。']));
+            const socket = makeSocket();
+            const svc = new ChatService();
+
+            await svc.handleUserInput(socket as never, { text: '何かおすすめはありますか', isVoiceInput: false });
+
+            const rec = socket.emit.mock.calls.find((c) => c[0] === 'recommendation');
+            expect(rec).toBeTruthy();
+        });
+    });
+
     describe('cancellation (barge-in)', () => {
         const tick = () => new Promise((r) => setTimeout(r, 0));
+
+        it('aborts the in-flight Gemini request when a newer input arrives', async () => {
+            // break で受信を止めるだけでは Gemini 側の生成は続き、課金される。
+            // 渡したシグナルが abort されることを確認する。
+            const socket = makeSocket();
+            const svc = new ChatService();
+            let firstSignal: AbortSignal | undefined;
+
+            generateResponseStream.mockReset();
+            generateResponseStream
+                .mockImplementationOnce(async (_t, _d, _h, _l, signal: AbortSignal) => {
+                    firstSignal = signal;
+                    return (async function* () {
+                        yield { text: () => '最初の文。' };
+                        // 実際の SDK と同様、abort されたらストリームが失敗する
+                        await new Promise((_, reject) =>
+                            signal.addEventListener('abort', () =>
+                                reject(new DOMException('aborted', 'AbortError')),
+                            ),
+                        );
+                    })();
+                })
+                .mockImplementationOnce(async () => makeStream(['新しい応答。']));
+
+            const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+            const p1 = svc.handleUserInput(socket as never, { text: 'first', isVoiceInput: false });
+            await tick();
+            expect(firstSignal?.aborted).toBe(false);
+
+            const p2 = svc.handleUserInput(socket as never, { text: 'second', isVoiceInput: false });
+            await Promise.all([p1, p2]);
+
+            expect(firstSignal?.aborted).toBe(true);
+            // 自分で中断したものはエラーとして通知もログもしない
+            const errors = socket.emit.mock.calls.filter((c) => c[0] === 'error');
+            expect(errors).toHaveLength(0);
+            expect(errSpy).not.toHaveBeenCalled();
+            errSpy.mockRestore();
+        });
+
+        it('aborts the in-flight Gemini request on dispose (disconnect)', async () => {
+            const socket = makeSocket();
+            const svc = new ChatService();
+            let signal: AbortSignal | undefined;
+
+            generateResponseStream.mockReset();
+            generateResponseStream.mockImplementationOnce(async (_t, _d, _h, _l, s: AbortSignal) => {
+                signal = s;
+                return (async function* () {
+                    yield { text: () => '途中まで。' };
+                    await new Promise((_, reject) =>
+                        s.addEventListener('abort', () =>
+                            reject(new DOMException('aborted', 'AbortError')),
+                        ),
+                    );
+                })();
+            });
+
+            const p = svc.handleUserInput(socket as never, { text: 'hi', isVoiceInput: false });
+            await tick();
+            svc.dispose();
+            await p;
+
+            expect(signal?.aborted).toBe(true);
+            const after = socket.emit.mock.calls.filter(
+                (c) => c[0] === 'response-complete' || c[0] === 'error',
+            );
+            expect(after).toHaveLength(0);
+        });
+
+        it('does not leave the interrupted user turn in the history', async () => {
+            const socket = makeSocket();
+            const svc = new ChatService();
+
+            let releaseFirst!: () => void;
+            const firstGate = new Promise<void>((r) => {
+                releaseFirst = r;
+            });
+
+            generateResponseStream.mockReset();
+            generateResponseStream
+                .mockImplementationOnce(async () =>
+                    (async function* () {
+                        yield { text: () => '古い応答。' };
+                        await firstGate;
+                    })(),
+                )
+                .mockImplementationOnce(async () => makeStream(['新しい応答。']));
+
+            const p1 = svc.handleUserInput(socket as never, { text: 'first', isVoiceInput: false });
+            await tick();
+            const p2 = svc.handleUserInput(socket as never, { text: 'second', isVoiceInput: false });
+            releaseFirst();
+            await Promise.all([p1, p2]);
+
+            // 2 回目に渡った履歴に、応答の無い 'first' が残っていない
+            expect(generateResponseStream.mock.calls[1][2]).toEqual([]);
+        });
 
         it('supersedes an in-flight response when a newer input arrives', async () => {
             const socket = makeSocket();

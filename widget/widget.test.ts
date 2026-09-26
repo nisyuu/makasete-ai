@@ -8,6 +8,7 @@ interface CapturedSocketOpts {
     onError: (message: string) => void;
     onConnect?: () => void;
     onResponseComplete?: () => void;
+    onConnectionLost?: (reason: 'connect-timeout' | 'disconnected') => void;
 }
 interface CapturedAudioOpts {
     onTranscript: (text: string) => void;
@@ -156,6 +157,45 @@ describe('initChatWidget (rich UI)', () => {
         expect(chatWindow.classList.contains('open')).toBe(false);
         expect(document.body.style.overflow).toBe('');
         expect(audioHandler.resetAudioState).toHaveBeenCalled();
+    });
+
+    it('should restore body scroll when the viewport widened after opening on mobile', () => {
+        // 幅 600px 以下で開く → 回転や拡大で 601px 以上 → ランチャーで閉じる、
+        // という流れでホストページがスクロール不能のまま残っていた。
+        vi.stubGlobal('innerWidth', 500);
+        initChatWidget();
+        const { launcherBtn } = getEls();
+
+        launcherBtn.click(); // open on mobile
+        expect(document.body.style.overflow).toBe('hidden');
+
+        vi.stubGlobal('innerWidth', 1024);
+        launcherBtn.click(); // close after widening
+        expect(document.body.style.overflow).toBe('');
+    });
+
+    it('should restore the host page own inline overflow value on close', () => {
+        vi.stubGlobal('innerWidth', 500);
+        document.body.style.overflow = 'scroll';
+        initChatWidget();
+        const { launcherBtn, closeBtn } = getEls();
+
+        launcherBtn.click();
+        expect(document.body.style.overflow).toBe('hidden');
+        closeBtn.click();
+        // 空文字ではなく、ホストが元々指定していた値に戻す
+        expect(document.body.style.overflow).toBe('scroll');
+    });
+
+    it('should not touch body overflow on desktop', () => {
+        vi.stubGlobal('innerWidth', 1024);
+        document.body.style.overflow = 'auto';
+        initChatWidget();
+        const { launcherBtn, closeBtn } = getEls();
+
+        launcherBtn.click();
+        closeBtn.click();
+        expect(document.body.style.overflow).toBe('auto');
     });
 
     it('should log an error when the health check request fails', async () => {
@@ -349,6 +389,111 @@ describe('initChatWidget (rich UI)', () => {
             initChatWidget();
             expect(() => captured.socketOpts!.onResponseComplete!()).not.toThrow();
             expect(() => captured.socketOpts!.onConnect!()).not.toThrow();
+        });
+
+        it('onResponseComplete should remove the typing indicator even for an empty response', () => {
+            initChatWidget();
+            const { input, sendBtn, timeline } = getEls();
+            input.value = 'q';
+            sendBtn.click();
+            expect(timeline.querySelector('.typing-indicator')).not.toBeNull();
+
+            captured.socketOpts!.onResponseComplete!();
+            expect(timeline.querySelector('.typing-indicator')).toBeNull();
+        });
+
+        it('onConnectionLost should hide the indicator, stop audio and explain what happened', () => {
+            initChatWidget();
+            const { input, sendBtn, timeline } = getEls();
+            input.value = 'q';
+            sendBtn.click();
+            audioHandler.resetAudioState.mockClear();
+
+            captured.socketOpts!.onConnectionLost!('disconnected');
+            expect(timeline.querySelector('.typing-indicator')).toBeNull();
+            expect(audioHandler.resetAudioState).toHaveBeenCalled();
+            const msgs = timeline.querySelectorAll('.message.makasete-server');
+            expect(msgs[msgs.length - 1].innerHTML).toContain('接続が切れました');
+        });
+
+        it('onConnectionLost should explain a connect timeout in English', () => {
+            initChatWidget({ language: 'en' });
+            const { timeline } = getEls();
+            captured.socketOpts!.onConnectionLost!('connect-timeout');
+            const msgs = timeline.querySelectorAll('.message.makasete-server');
+            expect(msgs[msgs.length - 1].innerHTML).toContain('Could not connect');
+        });
+
+        it('should stop the previous voice reply when a new message is typed', () => {
+            // テキスト入力で送った場合も、前の応答の読み上げを止める
+            initChatWidget();
+            const { input, sendBtn } = getEls();
+            audioHandler.resetAudioState.mockClear();
+            input.value = 'next question';
+            sendBtn.click();
+            expect(audioHandler.resetAudioState).toHaveBeenCalled();
+        });
+    });
+
+    describe('focus after a response', () => {
+        function stubPointer(coarse: boolean) {
+            vi.stubGlobal(
+                'matchMedia',
+                vi.fn(() => ({ matches: coarse }) as unknown as MediaQueryList),
+            );
+        }
+
+        it('should not steal focus from the host page', () => {
+            // 応答を待つ間にユーザーがホストページの入力欄で作業を始めていたら、
+            // 応答完了でウィジェットにフォーカスを奪ってはいけない。
+            stubPointer(false);
+            initChatWidget();
+            const { launcherBtn, input } = getEls();
+            launcherBtn.click();
+
+            const hostInput = document.createElement('input');
+            document.body.appendChild(hostInput);
+            hostInput.focus();
+            const focusSpy = vi.spyOn(input, 'focus');
+
+            captured.socketOpts!.onResponseComplete!();
+            expect(focusSpy).not.toHaveBeenCalled();
+            expect(document.activeElement).toBe(hostInput);
+        });
+
+        it('should return focus to the input when focus is already inside the widget', () => {
+            stubPointer(false);
+            initChatWidget();
+            const { launcherBtn, sendBtn, input } = getEls();
+            launcherBtn.click();
+            sendBtn.focus();
+            const focusSpy = vi.spyOn(input, 'focus');
+
+            captured.socketOpts!.onResponseComplete!();
+            expect(focusSpy).toHaveBeenCalled();
+        });
+
+        it('should not focus on touch devices (would pop up the keyboard)', () => {
+            stubPointer(true);
+            initChatWidget();
+            const { launcherBtn, sendBtn, input } = getEls();
+            launcherBtn.click();
+            sendBtn.focus();
+            const focusSpy = vi.spyOn(input, 'focus');
+
+            captured.socketOpts!.onResponseComplete!();
+            expect(focusSpy).not.toHaveBeenCalled();
+        });
+
+        it('should not focus when the chat window is closed', () => {
+            stubPointer(false);
+            initChatWidget();
+            const { sendBtn, input } = getEls();
+            sendBtn.focus();
+            const focusSpy = vi.spyOn(input, 'focus');
+
+            captured.socketOpts!.onResponseComplete!();
+            expect(focusSpy).not.toHaveBeenCalled();
         });
     });
 

@@ -41,6 +41,13 @@ resource "google_cloud_run_service" "makasete_servers" {
   name     = "makasete-ai-${each.key}"
   location = var.region
 
+  # 読み取り権限が揃ってからサービスを更新する。Secret の値（バージョン）は
+  # Terraform の外で登録するため、apply 前に登録されている必要がある
+  # （リポジトリ直下の README.md「デプロイ」を参照）。
+  depends_on = [
+    google_secret_manager_secret_iam_member.server_secret_accessor,
+  ]
+
   template {
     spec {
       service_account_name = google_service_account.makasete_server_sa.email
@@ -51,13 +58,29 @@ resource "google_cloud_run_service" "makasete_servers" {
           name  = "GOOGLE_SHEETS_ID"
           value = each.value.google_sheets_id
         }
+        # Security: API キーは Secret Manager から参照する。平文の env として
+        # 置くと、run.viewer 権限だけで `gcloud run services describe` から
+        # 読み取れてしまう。
         env {
-          name  = "GEMINI_API_KEY"
-          value = each.value.gemini_api_key
+          name = "GEMINI_API_KEY"
+          value_from {
+            secret_key_ref {
+              name = google_secret_manager_secret.server_secrets["${each.key}-gemini-api-key"].secret_id
+              key  = "latest"
+            }
+          }
         }
-        env {
-          name  = "ELEVENLABS_API_KEY"
-          value = each.value.elevenlabs_api_key
+        dynamic "env" {
+          for_each = var.tts_provider == "elevenlabs" ? [1] : []
+          content {
+            name = "ELEVENLABS_API_KEY"
+            value_from {
+              secret_key_ref {
+                name = google_secret_manager_secret.server_secrets["${each.key}-elevenlabs-api-key"].secret_id
+                key  = "latest"
+              }
+            }
+          }
         }
         env {
           name  = "ALLOWED_ORIGINS"
@@ -67,12 +90,36 @@ resource "google_cloud_run_service" "makasete_servers" {
           name  = "TTS_PROVIDER"
           value = var.tts_provider
         }
+        # 前段のプロキシ段数。実際の構成と合っていないと全利用者が 1 つの
+        # レート制限キーにまとめられる。決め方はリポジトリ直下の README.md
+        # 「プロキシ段数の確認」を参照。
+        env {
+          name  = "TRUSTED_PROXY_COUNT"
+          value = tostring(var.trusted_proxy_count)
+        }
+        env {
+          name  = "LOG_PROXY_HEADERS"
+          value = tostring(var.log_proxy_headers)
+        }
 
         resources {
           limits = {
             cpu    = "1000m"
             memory = "1024Mi"
           }
+        }
+
+        # /health は Sheets の取得に失敗している間 503 を返す。
+        # プローブを置かないとこの 503 は何も止めず、プロンプトも知識も無いインスタンスにトラフィックが流れる。
+        # 起動直後は Sheets の取得を待つため、猶予を長めに取る（10 秒間隔 × 12 回 = 最大 2 分）。
+        startup_probe {
+          http_get {
+            path = "/health"
+          }
+          initial_delay_seconds = 5
+          period_seconds        = 10
+          timeout_seconds       = 5
+          failure_threshold     = 12
         }
       }
     }
@@ -97,22 +144,29 @@ resource "google_cloud_run_service" "makasete_servers" {
 }
 
 # Allow unauthenticated access for each service
-data "google_iam_policy" "noauth" {
-  binding {
-    role = "roles/run.invoker"
-    members = [
-      "allUsers",
-    ]
-  }
-}
-
-resource "google_cloud_run_service_iam_policy" "noauth" {
+#
+# 以前は google_cloud_run_service_iam_policy を使っていたが、これはサービスの
+# IAM ポリシー全体を上書きする（authoritative）。同じサービスに別の
+# iam_member（scheduler.tf の Workflow 用 run.developer）を付けると、
+# apply のたびに片方が消えて付け直される取り合いになり、消えている間は
+# min-instances の変更が 403 で失敗する。追加的な iam_member に統一する。
+resource "google_cloud_run_service_iam_member" "noauth" {
   for_each = var.makasete_servers
   location = google_cloud_run_service.makasete_servers[each.key].location
   project  = google_cloud_run_service.makasete_servers[each.key].project
   service  = google_cloud_run_service.makasete_servers[each.key].name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
 
-  policy_data = data.google_iam_policy.noauth.policy_data
+# 旧リソースは state から外すだけにする。destroy すると、その瞬間に
+# サービスの IAM ポリシーが空になり、ウィジェットからアクセスできなくなる。
+removed {
+  from = google_cloud_run_service_iam_policy.noauth
+
+  lifecycle {
+    destroy = false
+  }
 }
 
 output "urls" {
