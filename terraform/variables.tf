@@ -30,8 +30,20 @@ variable "makasete_servers" {
 
 variable "allowed_origins" {
   type        = string
-  description = "Comma-separated list of origins allowed to embed the widget. Leave as \"*\" only for development: with \"*\" any third-party site can connect and consume the LLM/TTS budget."
-  default     = "*"
+  description = <<-EOT
+    ウィジェットの埋め込みを許可するサイトの origin をカンマ区切りで指定する。
+    既定値は置かない。未設定のまま apply できると、任意の第三者サイトが接続して LLM と TTS の利用料を消費できる状態で本番が動いてしまう。
+  EOT
+
+  validation {
+    condition     = !contains(split(",", replace(var.allowed_origins, " ", "")), "*")
+    error_message = "allowed_origins に \"*\" は指定できません。埋め込み先の origin を明示してください。"
+  }
+
+  validation {
+    condition     = length(trimspace(var.allowed_origins)) > 0
+    error_message = "allowed_origins を指定してください（例: https://your-shop.example）。"
+  }
 }
 
 variable "tts_provider" {

@@ -108,6 +108,19 @@ resource "google_cloud_run_service" "makasete_servers" {
             memory = "1024Mi"
           }
         }
+
+        # /health は Sheets の取得に失敗している間 503 を返す。
+        # プローブを置かないとこの 503 は何も止めず、プロンプトも知識も無いインスタンスにトラフィックが流れる。
+        # 起動直後は Sheets の取得を待つため、猶予を長めに取る（10 秒間隔 × 12 回 = 最大 2 分）。
+        startup_probe {
+          http_get {
+            path = "/health"
+          }
+          initial_delay_seconds = 5
+          period_seconds        = 10
+          timeout_seconds       = 5
+          failure_threshold     = 12
+        }
       }
     }
     metadata {

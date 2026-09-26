@@ -1,12 +1,13 @@
 # ---- Build stage ----
 # ビルドには devDependencies（vite / tsc）が必要なので、ビルド専用の段を分ける。
-# 最終イメージにはビルド成果物と本番依存だけを持ち込み、ソースや開発用ツール、
-# 誤ってコピーされうる資格情報がレイヤーに残らないようにする。
+# 最終イメージにはビルド成果物と本番依存だけを持ち込み、ソースや開発用ツール、誤ってコピーされうる資格情報がレイヤーに残らないようにする。
 FROM node:24-slim AS builder
 
 WORKDIR /app
 
-RUN npm install -g pnpm
+# package.json の packageManager を使うので、pnpm のバージョンがローカルとずれない。
+# `npm install -g pnpm` だと常に最新版が入り、lockfile の互換性が崩れることがある。
+RUN corepack enable
 
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile

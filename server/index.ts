@@ -12,7 +12,11 @@ import {
   isDataReady,
 } from "./services/sheets";
 import { ChatService } from "./services/chat";
-import { isOriginAllowed, parseAllowedOrigins } from "./utils/origin";
+import {
+  ALLOW_ALL_ORIGINS,
+  isOriginAllowed,
+  parseAllowedOrigins,
+} from "./utils/origin";
 import { resolveClientIp, toRateLimitKey } from "./utils/clientIp";
 import { ConnectionCounter } from "./utils/connectionCounter";
 import { ConcurrencyLimiter } from "./utils/concurrencyLimiter";
@@ -45,6 +49,13 @@ const logProxyHeaders = config.logProxyHeaders
 
 // Security: Use environment variable for allowed origins
 const allowedOrigins = parseAllowedOrigins(process.env.ALLOWED_ORIGINS);
+
+if (allowedOrigins === ALLOW_ALL_ORIGINS) {
+  console.warn(
+    "[config] ALLOWED_ORIGINS is not set: any site can connect to this server " +
+      "and spend the LLM/TTS budget. Set it to the origins that embed the widget.",
+  );
+}
 
 // 1. CORS Middleware (Must be FIRST)
 // credentials は使わない: Cookie も Authorization も送らないため不要で、origin "*" と併用するとブラウザ側でリクエストが拒否される。
