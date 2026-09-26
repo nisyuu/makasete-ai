@@ -6,11 +6,9 @@ const IPV6_SUBNET = 56;
 /**
  * X-Forwarded-For からクライアント IP を求める。
  *
- * XFF は「client, proxy1, proxy2」の順で左から追記される。左端はクライアントが
- * 自由に詐称できるため、接続数制限の鍵に使うと制限を回避されたり、他人の IP を
- * 名乗って正規ユーザーを締め出せてしまう。信頼できるのは自分の手前のプロキシが
- * 追記した値だけなので、右から trustedProxyCount ホップ分だけ遡った要素を採用する
- * （Express の `trust proxy: 1` と同じ考え方）。
+ * XFF は「client, proxy1, proxy2」の順で左から追記される。
+ * 左端はクライアントが自由に詐称できるため、接続数制限の鍵に使うと制限を回避されたり、他人の IP を名乗って正規ユーザーを締め出せてしまう。
+ * 信頼できるのは自分の手前のプロキシが追記した値だけなので、右から trustedProxyCount ホップ分だけ遡った要素を採用する（Express の `trust proxy: 1` と同じ考え方）。
  */
 export function resolveClientIp(
   forwardedFor: string | string[] | undefined,
@@ -38,9 +36,8 @@ export function resolveClientIp(
 /**
  * レート制限や接続数制限のキーに使う形へ正規化する。
  *
- * IPv6 はひとりの利用者が /64 を丸ごと持っていることが普通で、アドレスそのものを
- * キーにすると送信元を変えるだけで上限を回避できる。express-rate-limit と同じく
- * /56 単位にまとめる（IPv4 はそのまま、IPv4 射影アドレスは IPv4 に戻る）。
+ * IPv6 はひとりの利用者が /64 を丸ごと持っていることが普通で、アドレスそのものをキーにすると送信元を変えるだけで上限を回避できる。
+ * express-rate-limit と同じく /56 単位にまとめる（IPv4 はそのまま、IPv4 射影アドレスは IPv4 に戻る）。
  */
 export function toRateLimitKey(ip: string): string {
   try {

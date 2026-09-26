@@ -48,10 +48,9 @@ ${dynamicContext}
 `;
 }
 
-// Object.create(null) でプロトタイプを持たない辞書にする。通常のオブジェクト
-// リテラルだと `LANGUAGE_PROMPTS["constructor"]` が Object 関数を返し、
-// `?? LANGUAGE_PROMPTS.ja` のフォールバックをすり抜けて関数がそのまま
-// プロンプトに混入する。resolveLanguage と二重に防御する。
+// Object.create(null) でプロトタイプを持たない辞書にする。
+// 通常のオブジェクトリテラルだと `LANGUAGE_PROMPTS["constructor"]` が Object 関数を返し、`?? LANGUAGE_PROMPTS.ja` のフォールバックをすり抜けて関数がそのままプロンプトに混入する。
+// resolveLanguage と二重に防御する。
 const LANGUAGE_PROMPTS: Record<string, string> = Object.assign(
     Object.create(null),
     {
