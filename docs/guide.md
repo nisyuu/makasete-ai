@@ -100,11 +100,7 @@ AI の知識ベースとなるスプレッドシートの構成です。
 ### サーバーのデプロイ
 
 1. **Google Cloud の準備**: Cloud Run, Secret Manager などを有効化。
-2. **Terraform の実行**:
-   ```bash
-   cd terraform
-   terraform apply
-   ```
+2. **デプロイ**: 稼働環境のデプロイは別リポジトリ `makasete-ai-platform` の Cloud Build トリガーが行います。このリポジトリの `terraform/` は使われていません（[terraform/README.md](../terraform/README.md)）。
 3. **スプレッドシートの紐付け**: Makaseteサーバーごとに `GOOGLE_SHEETS_ID` を設定。
 
 ---
