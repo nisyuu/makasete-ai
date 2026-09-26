@@ -14,7 +14,7 @@ vi.mock('./google', () => ({ GeminiTTSService: GeminiCtor }));
 
 // resetModules を使うため、config も factory も毎回フレッシュにインポートして
 // 同一レジストリ上の config インスタンスを共有させる。
-async function loadFactory(provider: string) {
+async function loadFactory(provider: 'gemini' | 'elevenlabs') {
     vi.resetModules();
     const { config } = await import('../../config');
     config.ttsProvider = provider;

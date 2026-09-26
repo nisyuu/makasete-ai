@@ -39,6 +39,39 @@ describe('widget text utilities', () => {
       expect(output).toContain('href="/local/path"');
     });
 
+    it('should block backslash and whitespace tricks that browsers normalize', () => {
+      // ブラウザはバックスラッシュをスラッシュに直し、タブや改行を取り除くため、
+      // これらは「相対パス」のふりをして外部サイトへ飛ぶ
+      for (const url of ['/\\evil.example/x', '/\t/evil.example/x', '/\n/evil.example/x', '/\\\\evil.example']) {
+        const output = formatMessageText(`[bank](${url})`);
+        expect(output).toContain('href="#"');
+        expect(output).not.toContain('evil.example');
+      }
+    });
+
+    it('should block protocol-relative URLs that point to another host', () => {
+      // "//evil.example" は先頭が "/" なので素朴な相対パス判定をすり抜け、
+      // 表示テキストと遷移先が食い違うリンクになる。
+      const output = formatMessageText('Click [your bank](//evil.example/login)');
+      expect(output).toContain('href="#"');
+      expect(output).not.toContain('evil.example/login"');
+    });
+
+    it('should block backslash-prefixed and whitespace-padded dangerous URLs', () => {
+      expect(formatMessageText('[x](  javascript:alert(1))')).toContain('href="#"');
+      expect(formatMessageText('[x](data:text/html,<script>)')).toContain('href="#"');
+      expect(formatMessageText('[x](vbscript:msgbox)')).toContain('href="#"');
+    });
+
+    it('should still allow absolute http and https links', () => {
+      expect(formatMessageText('[a](http://shop.example/x)')).toContain(
+        'href="http://shop.example/x"',
+      );
+      expect(formatMessageText('[a](https://shop.example/x)')).toContain(
+        'href="https://shop.example/x"',
+      );
+    });
+
     it('should preserve regular text with ampersands', () => {
       const input = 'Fish & Chips';
       const output = formatMessageText(input);

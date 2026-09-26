@@ -53,10 +53,32 @@ ECサイトやサービスサイトに簡単導入でき、音声とテキスト
 
 本プロジェクトでは、本番環境での運用を考慮し、ソースコードレベルで以下のセキュリティ対策を実装しています。
 
-- **プロキシ信頼設定**: Cloud Run などのリバースプロキシ経由でも正しくクライアントの IP アドレスを取得できるよう `trust proxy` を設定し、正確なレート制限を可能にしています。
-- **HTTP レート制限**: `express-rate-limit` を導入し、15分間に 100 リクエストを超える過剰な API アクセスを遮断します。
-- **WebSocket 接続制限**: 同一 IP アドレスからの同時接続数を 5 件までに制限し、リソースの枯渇（DoS攻撃）を防いでいます。
+- **プロキシ信頼設定**: リバースプロキシ経由でも正しくクライアントの IP アドレスを取得できるよう、信頼する段数を `TRUSTED_PROXY_COUNT` で設定します。**この値が実際の構成と合っていないと、全利用者が 1 つのキーにまとめられ、同時接続やレート制限の枠をサイト全体で共有してしまいます**（6 人目以降が接続できない、といった形で表面化します）。値の決め方は下記「プロキシ段数の確認」を参照してください。
+- **HTTP レート制限**: `express-rate-limit` を導入し、過剰な API アクセスを遮断します。ウィジェット配信と読み取り API は緩め、それ以外は厳しめに、経路ごとに分けています。IPv6 は /56 単位でまとめ、送信元アドレスを変えるだけで回避されるのを防いでいます。
+- **WebSocket 接続制限**: 同一クライアントからの同時接続数を制限します（既定 20、`MAX_CONNECTIONS_PER_CLIENT`）。
+- **同時生成数の上限**: プロセス全体で同時に走る応答生成を制限します（既定 8、`MAX_CONCURRENT_GENERATIONS`）。クライアントの識別に依存しないため、プロキシ設定を誤っても LLM と TTS の費用に歯止めがかかります。
+- **Origin 検証**: `ALLOWED_ORIGINS` を HTTP の CORS と Socket.IO のハンドシェイクの両方で検証します。表記の揺れ（末尾スラッシュ・大文字）は正規化して比較します。
 - **機密データの保護**: スプレッドシートの `prompt` シート（AIの性格設定等）は API 経由で公開されないよう、エンドポイント側でアクセスをブロックしています。
+
+### プロキシ段数の確認
+
+`TRUSTED_PROXY_COUNT` は、X-Forwarded-For の右から何番目をクライアントの IP として扱うかを決めます。Cloud Run に直接つなぐ構成なら `1`、前段に Firebase App Hosting や外部ロードバランサ、CDN がある場合は `2` です。
+
+実際の値は、デプロイ先で一度ログを確認して決めます。
+
+1. 環境変数に `LOG_PROXY_HEADERS=true` を設定してデプロイします。
+2. サイトを開き、ログを確認します。
+   ```
+   [proxy] http hops=1 chain=["203.0.113.5"] resolvedKey=203.0.113.5
+   ```
+   `hops` が `TRUSTED_PROXY_COUNT` と同じなら、その値で正しく動いています。
+3. 次のような警告が出た場合は、`resolvedKey` が利用者ではなくプロキシの IP になっています。`TRUSTED_PROXY_COUNT` を `hops` と同じ値にしてください。
+   ```
+   [proxy] http hops=2 chain=["203.0.113.5","35.191.0.1"] resolvedKey=35.191.0.1 — expected hops=1. ...
+   ```
+4. 値が決まったら `LOG_PROXY_HEADERS` を外します。
+
+ログは起動後の先頭 10 件だけ出力され、その後は止まります。
 
 ## 開発環境セットアップ
 
@@ -123,6 +145,8 @@ ECサイトの `</body>` タグの直前に以下のスクリプトを追加し�
 ```
 
 > **注意**: 埋め込み先サイトからの接続はクロスオリジンになるため、サーバー側の環境変数 `ALLOWED_ORIGINS` に埋め込み先サイトの origin（例: `https://example.com`）を含める必要があります。
+>
+> `ALLOWED_ORIGINS` は HTTP の CORS と Socket.IO のハンドシェイクの両方で検証されます。未設定（既定の `*`）のままだと、**任意の第三者サイトがこのサーバーに接続して LLM / TTS の利用料を消費できる** 状態になるため、本番環境では必ず設定してください。
 
 ## スプレッドシートの構成
 
@@ -191,13 +215,42 @@ Terraformを使用してデプロイします。本システムは、複数の�
    }
    ```
 
-3. **Terraformの適用**:
+   API キーは `terraform.tfvars` に書きません。Terraform に値を渡すと state ファイルに平文で保存されるため、次の手順で Secret Manager に直接登録します。
+
+3. **Secret の作成と API キーの登録**:
+   まず Secret の箱だけを作ります。
    ```bash
    cd terraform
    terraform init
+   terraform apply \
+     -target=google_secret_manager_secret.server_secrets \
+     -target=google_secret_manager_secret_iam_member.server_secret_accessor
+   ```
+   出力された `secret_ids` の各 Secret に、API キーを登録します。キーはシェル履歴に残らないよう標準入力から渡してください。
+   ```bash
+   # Makaseteサーバーごとに実行（server-1 は makasete_servers のキー）
+   printf '%s' "$GEMINI_API_KEY" | gcloud secrets versions add makasete-ai-server-1-gemini-api-key --data-file=-
+
+   # tts_provider = "elevenlabs" の場合のみ
+   printf '%s' "$ELEVENLABS_API_KEY" | gcloud secrets versions add makasete-ai-server-1-elevenlabs-api-key --data-file=-
+   ```
+   キーを変更したいときも同じコマンドで新しいバージョンを追加します。Cloud Run は `latest` を参照するため、次のデプロイから反映されます。
+
+4. **Terraformの適用**:
+   ```bash
    terraform apply
    ```
    実行後、各Makaseteサーバーの URL および **Cloud Build トリガーID** が出力されます。このトリガーIDを後述のGAS設定で使用します。
+
+### 既存環境からの移行（API キーを tfvars に書いていた場合）
+
+以前の構成では API キーを `terraform.tfvars` に書き、Cloud Run の環境変数へ平文で渡していました。移行時は次の手順を踏んでください。
+
+1. 上記の手順 3 で Secret を作り、API キーを登録する。
+2. `terraform.tfvars` の `makasete_servers` から `gemini_api_key` と `elevenlabs_api_key` を削除する（残っていても無視されますが、ファイルには平文で残ります）。
+3. `terraform apply` で Cloud Run の環境変数を Secret 参照に切り替える。
+4. **API キーをローテーションする。** 旧キーは `terraform.tfstate` とそのバックアップ、Cloud Run の過去のリビジョンに平文で残っています。Google AI Studio と ElevenLabs で新しいキーを発行して手順 3 と同じ方法で登録し、旧キーを無効化してください。
+5. 旧キーを含む `terraform.tfstate.backup` を削除する。
 
 ## スプレッドシート連携 (GAS)
 

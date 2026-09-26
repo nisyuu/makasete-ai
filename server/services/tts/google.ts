@@ -3,6 +3,7 @@ import { Readable } from 'stream';
 import fs from 'fs';
 import path from 'path';
 import { TTSService } from './types';
+import { resolveLanguage } from '../../utils/language';
 
 export class GeminiTTSService implements TTSService {
     private client: texttospeech_v1.Texttospeech | null = null;
@@ -40,10 +41,15 @@ export class GeminiTTSService implements TTSService {
     // low-latency real-time synthesis. Voice names are shared across locales
     // in the <locale>-Chirp3-HD-<voice> format. "Aoede" is a bright, friendly
     // voice that fits customer-support / help-desk / FAQ use cases.
-    private static readonly VOICES: Record<string, texttospeech_v1.Schema$VoiceSelectionParams> = {
-        ja: { languageCode: 'ja-JP', name: 'ja-JP-Chirp3-HD-Aoede' },
-        en: { languageCode: 'en-US', name: 'en-US-Chirp3-HD-Aoede' },
-    };
+    // Object.create(null) でプロトタイプ経由の参照（language="constructor" など）を塞ぐ。
+    // 通常のリテラルだと未知のキーで Object 由来の値が返り、`??` のフォールバックが働かないまま不正な voice 指定として API に送られてしまう。
+    private static readonly VOICES: Record<string, texttospeech_v1.Schema$VoiceSelectionParams> = Object.assign(
+        Object.create(null),
+        {
+            ja: { languageCode: 'ja-JP', name: 'ja-JP-Chirp3-HD-Aoede' },
+            en: { languageCode: 'en-US', name: 'en-US-Chirp3-HD-Aoede' },
+        },
+    );
 
     // Slightly faster-than-normal pace for a snappier response feel. Chirp 3: HD
     // voices support speakingRate in the 0.25–2.0 range (1.0 = normal speed).
@@ -51,7 +57,7 @@ export class GeminiTTSService implements TTSService {
 
     public async generateSpeechStream(text: string, language = 'ja'): Promise<Readable> {
         const client = await this.getClient();
-        const voice = GeminiTTSService.VOICES[language] ?? GeminiTTSService.VOICES.ja;
+        const voice = GeminiTTSService.VOICES[resolveLanguage(language)] ?? GeminiTTSService.VOICES.ja;
 
         try {
             const isSsml = text.trim().startsWith('<speak>');

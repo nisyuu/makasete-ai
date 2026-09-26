@@ -8,10 +8,12 @@ import {
   stripTags,
   cleanupForTTS,
   hasTags,
+  isSsml,
   removeMarkdownLinks,
 } from "../utils/text";
 import { getRecommendations } from "./recommendations";
 import { isProductCardsEnabled } from "./settings";
+import { resolveLanguage } from "../utils/language";
 
 export class ChatService {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -25,7 +27,16 @@ export class ChatService {
     socket: Socket,
     data: { text: string; isVoiceInput: boolean; language?: string },
   ): Promise<void> {
-    const { text, isVoiceInput, language = "ja" } = data;
+    // ペイロードを信用しない。
+    // null / undefined / プリミティブを分割代入すると TypeError で Promise が reject し、呼び出し側が拾い損ねるとプロセスごと落ちる。
+    // クライアントは誰でも任意のペイロードを送れるので必ず検証する。
+    if (data === null || typeof data !== "object") {
+      socket.emit("error", { message: "Input is invalid" });
+      return;
+    }
+
+    const { text, isVoiceInput } = data;
+    const language = resolveLanguage(data.language);
 
     if (!text || typeof text !== "string" || text.length > 1000) {
       socket.emit("error", { message: "Input is invalid" });
@@ -70,9 +81,22 @@ export class ChatService {
             if (isSuperseded()) {
               // Superseded by a newer input: discard the buffered audio without
               // emitting it. Resuming with no data listener drains and drops it.
-              return streamPromise.then((s) => {
-                s?.resume();
-              });
+              //
+              // 'error' リスナーを必ず先に付ける。
+              // ElevenLabs のストリームは resume 後に下流の fetch が失敗すると 'error' を emit し、リスナーが無い Readable の 'error' は uncaughtException になってプロセスを落とす。
+              return streamPromise
+                .then((s) => {
+                  if (!s) return;
+                  s.on("error", (err: Error) => {
+                    console.error("[TTS] Discarded stream error:", err.message);
+                  });
+                  s.resume();
+                })
+                .catch((err: unknown) => {
+                  const message =
+                    err instanceof Error ? err.message : String(err);
+                  console.error("[TTS] Failed to discard stream:", message);
+                });
             }
             return this.drainStreamToSocket(socket, streamPromise);
           });
@@ -199,7 +223,10 @@ export class ChatService {
 
   // Prepares the TTS input string, applying SSML pause tuning for Google TTS.
   private prepareTTSInput(sentence: string, ttsProviderName: string): string | null {
-    if (hasTags(sentence)) {
+    // すでに SSML として組み立てられた文だけを素通しする。
+    // `hasTags` は `<[^>]*>` に一致するだけなので、LLM が出力した「A<B>C」や「<br>」でも真になり、無エスケープのまま <speak> に包まれて TTS の SSML パースエラーを招く（その文だけ音声が無言になる）。
+    // 先頭が <speak> の場合に限定し、それ以外は必ずエスケープ経路へ送る。
+    if (isSsml(sentence) && hasTags(sentence)) {
       const innerText = sentence.replace(/<\/?speak>/g, "").trim();
       const ssmlContent = removeMarkdownLinks(innerText);
       if (!ssmlContent.trim() || !ssmlContent.replace(/<[^>]*>/g, "").trim()) return null;

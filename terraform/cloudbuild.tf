@@ -8,13 +8,21 @@ resource "google_service_account" "cloudbuild_sa" {
 resource "google_project_iam_member" "cloudbuild_sa_roles" {
   for_each = toset([
     "roles/run.developer",
-    "roles/iam.serviceAccountUser",
     "roles/logging.logWriter",
     "roles/artifactregistry.writer"
   ])
   project = var.project_id
   role    = each.key
   member  = "serviceAccount:${google_service_account.cloudbuild_sa.email}"
+}
+
+# Security: serviceAccountUser はプロジェクト全体ではなく、デプロイ先の実行
+# サービスアカウントだけに限定する。プロジェクトレベルで付けると、既定の
+# Compute SA を含むすべてのサービスアカウントを actAs できてしまう。
+resource "google_service_account_iam_member" "cloudbuild_act_as_server_sa" {
+  service_account_id = google_service_account.makasete_server_sa.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.cloudbuild_sa.email}"
 }
 
 # 3. Allow Cloud Build Service Agent to use this service account

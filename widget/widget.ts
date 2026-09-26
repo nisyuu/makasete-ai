@@ -27,8 +27,53 @@ const ICON_AUDIO_ON = `<svg class="lucide lucide-volume-2" viewBox="0 0 24 24" f
 /** 音声読み上げ OFF（ミュート）アイコン */
 const ICON_AUDIO_OFF = `<svg class="lucide lucide-volume-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="22" x2="16" y1="9" y2="15"/><line x1="16" x2="22" y1="9" y2="15"/></svg>`;
 
+/**
+ * 属性値として安全な形にエスケープする。
+ *
+ * placeholder や helperText は今のところコード内の既定値だが、将来 settings シートから流し込む改修が入ると、テンプレートリテラル経由でそのまま innerHTML に渡るため属性を抜け出して XSS になる。
+ * 入口で常にエスケープしておく。
+ */
+function escapeAttribute(value: string): string {
+  return value.replace(
+    /[&<>"']/g,
+    (char) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      })[char] || char,
+  );
+}
+
+/**
+ * Shadow Root にウィジェットの CSS を適用する。
+ *
+ * Constructable Stylesheet を優先し、非対応ブラウザや失敗時のみ <style> 要素へフォールバックする。
+ * CSP の `style-src` にインラインが許可されていない埋め込み先でもスタイルが落ちないようにするため。
+ */
+function applyWidgetStyles(shadow: ShadowRoot): void {
+  if (typeof CSSStyleSheet === "function" && "adoptedStyleSheets" in shadow) {
+    try {
+      const sheet = new CSSStyleSheet();
+      sheet.replaceSync(widgetStyles);
+      shadow.adoptedStyleSheets = [...shadow.adoptedStyleSheets, sheet];
+      return;
+    } catch {
+      // replaceSync 非対応などの場合は <style> にフォールバックする
+    }
+  }
+
+  const style = document.createElement("style");
+  style.textContent = widgetStyles;
+  shadow.appendChild(style);
+}
+
 /** ウィジェットのリッチUIマークアップ（ランチャーボタン・チャットウィンドウ等） */
 function buildWidgetMarkup(placeholder: string, helperText: string): string {
+  const safePlaceholder = escapeAttribute(placeholder);
+  const safeHelperText = escapeAttribute(helperText);
   return `
     <div class="widget-container">
       <div class="chat-window">
@@ -46,14 +91,14 @@ function buildWidgetMarkup(placeholder: string, helperText: string): string {
         <div class="chat-timeline"></div>
         <div class="input-area">
           <div class="input-wrapper">
-            <textarea class="text-input" placeholder="${placeholder}" rows="1"></textarea>
-            <div class="input-helper">${helperText}</div>
+            <textarea class="text-input" placeholder="${safePlaceholder}" rows="1"></textarea>
+            <div class="input-helper">${safeHelperText}</div>
           </div>
           <div class="input-actions">
             <button class="btn mic-btn" title="音声入力">
               <svg class="lucide lucide-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
             </button>
-            <button class="btn send-btn" title="送信" style="display: none;">
+            <button class="btn send-btn" title="送信">
               <svg class="lucide lucide-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
             </button>
           </div>
@@ -97,9 +142,10 @@ export function initChatWidget(config: WidgetConfig = {}): void {
   document.body.appendChild(host);
   const shadow = host.attachShadow({ mode: "open" });
 
-  const style = document.createElement("style");
-  style.textContent = widgetStyles;
-  shadow.appendChild(style);
+  // 埋め込み先が `style-src 'self'` のような CSP を設定していると、<style> 要素のインライン CSS はブロックされ、ウィジェットが素の HTML として表示される。
+  // Constructable Stylesheet（adoptedStyleSheets）は CSSOM 経由なので CSP のインライン制限を受けない。
+  // 非対応ブラウザだけ従来の <style> にフォールバックする。
+  applyWidgetStyles(shadow);
 
   const wrapper = document.createElement("div");
   wrapper.innerHTML = buildWidgetMarkup(placeholder, helperText);
@@ -110,6 +156,10 @@ export function initChatWidget(config: WidgetConfig = {}): void {
 
   const els = getUIElements(shadow);
   els.chatTitle.textContent = title;
+
+  // 送信ボタンの初期状態（入力が空なので非表示）。
+  // マークアップに style="display: none" を書くと CSP の style-src で落ちる環境があるため、CSSOM 経由で設定する。
+  updateInputActions(els.input, els.sendBtn, els.micBtn);
 
   const messageState: MessageState = { currentMakaseteServerMessageRaw: "" };
 

@@ -86,8 +86,8 @@ describe("resolveServerUrl", () => {
   });
 
   it("should pick the last matching script when multiple widget.js tags exist", () => {
-    const first = createScript({ src: "https://old.example/widget.js" });
-    const second = createScript({ src: "https://new.example/widget.js" });
+    const first = createScript({ src: "https://old.example/public/widget.js" });
+    const second = createScript({ src: "https://new.example/public/widget.js" });
     expect(
       resolveServerUrl({
         currentScript: null,
@@ -95,6 +95,36 @@ describe("resolveServerUrl", () => {
         fallbackOrigin,
       }),
     ).toBe("https://new.example");
+  });
+
+  it("should ignore another vendor's widget.js when scanning", () => {
+    // ホストページが別ベンダーの widget.js を読み込んでいても、その origin を
+    // サーバーとして採用してはいけない（チャット内容が第三者に送られる）。
+    const vendor = createScript({ src: "https://vendor.example/widget.js" });
+    expect(
+      resolveServerUrl({
+        currentScript: null,
+        scripts: [vendor],
+        fallbackOrigin,
+      }),
+    ).toBe(fallbackOrigin);
+  });
+
+  it("should prefer a data-server-url tag over any scanned src", () => {
+    const vendor = createScript({
+      src: "https://vendor.example/public/widget.js",
+    });
+    const configured = createScript({
+      src: "https://cdn.example/bundle.js",
+      serverUrl: "https://api.example.com",
+    });
+    expect(
+      resolveServerUrl({
+        currentScript: null,
+        scripts: [configured, vendor],
+        fallbackOrigin,
+      }),
+    ).toBe("https://api.example.com");
   });
 
   it("should return the fallback origin when nothing matches", () => {
