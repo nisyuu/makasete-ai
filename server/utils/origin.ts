@@ -20,16 +20,42 @@ export function parseAllowedOrigins(
 ): string[] | typeof ALLOW_ALL_ORIGINS {
   if (!raw) return ALLOW_ALL_ORIGINS;
 
-  const origins = raw
+  const entries = raw
     .split(",")
     .map((origin) => origin.trim())
     .filter(Boolean);
 
-  if (origins.length === 0 || origins.includes(ALLOW_ALL_ORIGINS)) {
+  if (entries.length === 0 || entries.includes(ALLOW_ALL_ORIGINS)) {
     return ALLOW_ALL_ORIGINS;
   }
 
+  // ブラウザが送る Origin は "https://example.com" の形に正規化されている。
+  // 設定側に末尾スラッシュや大文字が混ざっていると一致せず、ウィジェットが
+  // 動かなくなるため、こちらも origin の形に揃えてから比較する。
+  const origins: string[] = [];
+  for (const entry of entries) {
+    const normalized = normalizeOrigin(entry);
+    if (normalized === null) {
+      console.warn(`[config] Ignoring invalid ALLOWED_ORIGINS entry: ${entry}`);
+      continue;
+    }
+    if (!origins.includes(normalized)) origins.push(normalized);
+  }
+
+  // すべて不正だった場合は全許可には戻さない（設定ミスで公開状態にしない）
   return origins;
+}
+
+/** "https://Example.com/" のような表記を "https://example.com" に揃える。 */
+export function normalizeOrigin(value: string): string | null {
+  try {
+    const { origin } = new URL(value);
+    // new URL("foo") は失敗するが、new URL("foo:bar") のような値は origin が
+    // "null" になる。これを許可リストに入れない。
+    return origin === "null" ? null : origin;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -45,5 +71,7 @@ export function isOriginAllowed(
 ): boolean {
   if (allowed === ALLOW_ALL_ORIGINS) return true;
   if (!origin) return true;
-  return allowed.includes(origin);
+  const normalized = normalizeOrigin(origin);
+  if (normalized === null) return false;
+  return allowed.includes(normalized);
 }

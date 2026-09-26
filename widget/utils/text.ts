@@ -11,6 +11,22 @@ export function normalizeSettingKey(key: string): string {
 }
 
 /**
+ * URL に含まれてはいけない文字（バックスラッシュと制御文字）が無いかを調べる。
+ *
+ * ブラウザはバックスラッシュをスラッシュとして解釈し、タブや改行は URL から
+ * 取り除く。そのため "/\evil.example" や "/<TAB>/evil.example" は相対パスに
+ * 見えて実際には外部サイトへ飛ぶ。
+ */
+function hasUnsafeUrlChars(url: string): boolean {
+  if (url.includes("\\")) return true;
+  for (let i = 0; i < url.length; i++) {
+    const code = url.charCodeAt(i);
+    if (code <= 0x1f || code === 0x7f) return true;
+  }
+  return false;
+}
+
+/**
  * Formats raw text into safe HTML, escaping potential XSS and converting markdown links.
  */
 export function formatMessageText(rawText: string): string {
@@ -34,10 +50,17 @@ export function formatMessageText(rawText: string): string {
   const sanitizeUrl = (url: string) => {
     const trimmed = url.trim();
 
-    // プロトコル相対 URL（//evil.example/...）は先頭が "/" なので素朴な
-    // 相対パス判定をすり抜け、任意の外部ホストへのリンクになる。表示テキストと
-    // 実際の遷移先が食い違うリンクを LLM 出力から作れてしまうため、
-    // スラッシュ 1 個で始まるものだけを相対パスとして許可する。
+    // ブラウザの URL 解釈に合わせて、先に危険な文字を落とす。
+    // バックスラッシュはスラッシュとして扱われ、タブや改行は取り除かれるため、
+    // "/\evil.example" や "/<TAB>/evil.example" は「相対パス」のふりをして
+    // 外部サイトへ飛ぶ。制御文字ごと拒否する。
+    if (hasUnsafeUrlChars(trimmed)) {
+      return "#";
+    }
+
+    // スラッシュ 1 個で始まるものだけを同一サイトの相対パスとして許可する。
+    // "//evil.example/..." は先頭が "/" でもプロトコル相対 URL で、
+    // 任意の外部ホストへのリンクになる。
     if (/^\/(?!\/)/.test(trimmed)) {
       return trimmed;
     }

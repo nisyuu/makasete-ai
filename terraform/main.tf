@@ -120,22 +120,29 @@ resource "google_cloud_run_service" "makasete_servers" {
 }
 
 # Allow unauthenticated access for each service
-data "google_iam_policy" "noauth" {
-  binding {
-    role = "roles/run.invoker"
-    members = [
-      "allUsers",
-    ]
-  }
-}
-
-resource "google_cloud_run_service_iam_policy" "noauth" {
+#
+# 以前は google_cloud_run_service_iam_policy を使っていたが、これはサービスの
+# IAM ポリシー全体を上書きする（authoritative）。同じサービスに別の
+# iam_member（scheduler.tf の Workflow 用 run.developer）を付けると、
+# apply のたびに片方が消えて付け直される取り合いになり、消えている間は
+# min-instances の変更が 403 で失敗する。追加的な iam_member に統一する。
+resource "google_cloud_run_service_iam_member" "noauth" {
   for_each = var.makasete_servers
   location = google_cloud_run_service.makasete_servers[each.key].location
   project  = google_cloud_run_service.makasete_servers[each.key].project
   service  = google_cloud_run_service.makasete_servers[each.key].name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
 
-  policy_data = data.google_iam_policy.noauth.policy_data
+# 旧リソースは state から外すだけにする。destroy すると、その瞬間に
+# サービスの IAM ポリシーが空になり、ウィジェットからアクセスできなくなる。
+removed {
+  from = google_cloud_run_service_iam_policy.noauth
+
+  lifecycle {
+    destroy = false
+  }
 }
 
 output "urls" {

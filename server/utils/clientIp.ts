@@ -1,3 +1,8 @@
+import { ipKeyGenerator } from "express-rate-limit";
+
+/** IPv6 をまとめる単位。express-rate-limit の既定値と揃える。 */
+const IPV6_SUBNET = 56;
+
 /**
  * X-Forwarded-For からクライアント IP を求める。
  *
@@ -28,4 +33,20 @@ export function resolveClientIp(
   // 右端は直近プロキシが追記した値。そこから trustedProxyCount ホップ分だけ左へ。
   const index = hops.length - trustedProxyCount;
   return hops[Math.max(index, 0)] ?? remoteAddress;
+}
+
+/**
+ * レート制限や接続数制限のキーに使う形へ正規化する。
+ *
+ * IPv6 はひとりの利用者が /64 を丸ごと持っていることが普通で、アドレスそのものを
+ * キーにすると送信元を変えるだけで上限を回避できる。express-rate-limit と同じく
+ * /56 単位にまとめる（IPv4 はそのまま、IPv4 射影アドレスは IPv4 に戻る）。
+ */
+export function toRateLimitKey(ip: string): string {
+  try {
+    return ipKeyGenerator(ip, IPV6_SUBNET);
+  } catch {
+    // 解析できない値はそのままキーにする（未知の形式でも上限は効かせる）
+    return ip;
+  }
 }

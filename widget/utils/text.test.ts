@@ -39,6 +39,16 @@ describe('widget text utilities', () => {
       expect(output).toContain('href="/local/path"');
     });
 
+    it('should block backslash and whitespace tricks that browsers normalize', () => {
+      // ブラウザはバックスラッシュをスラッシュに直し、タブや改行を取り除くため、
+      // これらは「相対パス」のふりをして外部サイトへ飛ぶ
+      for (const url of ['/\\evil.example/x', '/\t/evil.example/x', '/\n/evil.example/x', '/\\\\evil.example']) {
+        const output = formatMessageText(`[bank](${url})`);
+        expect(output).toContain('href="#"');
+        expect(output).not.toContain('evil.example');
+      }
+    });
+
     it('should block protocol-relative URLs that point to another host', () => {
       // "//evil.example" は先頭が "/" なので素朴な相対パス判定をすり抜け、
       // 表示テキストと遷移先が食い違うリンクになる。
