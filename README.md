@@ -218,7 +218,7 @@ Terraformを使用してデプロイします。本システムは、複数の�
    ```bash
    terraform apply
    ```
-   実行後、各Makaseteサーバーの URL および **Cloud Build トリガーID** が出力されます。このトリガーIDを後述のGAS設定で使用します。
+   実行後、各Makaseteサーバーの URL、**Cloud Build トリガーID**、および **Webhook トリガーID**（`cloudbuild_webhook_trigger_ids`）が出力されます。Webhook トリガーIDを後述のGAS設定で使用します。
 
 ### 既存環境からの移行（API キーを tfvars に書いていた場合）
 
@@ -234,14 +234,32 @@ Terraformを使用してデプロイします。本システムは、複数の�
 
 `gas/` ディレクトリには、Google スプレッドシートから直接サーバーの再構築（デプロイ）を実行するためのスクリプトが含まれています。これにより、プロンプトや商品データを更新した後に、エンジニアでなくてもワンクリックで最新の状態を反映させることが可能です。
 
+### 仕組みと権限について
+
+このスクリプトは Cloud Build の **Webhook トリガー** を呼び出します。スクリプトが持つのは「このトリガーを起動する鍵」だけで、Google Cloud の他の操作はできません。
+
+以前は実行者の OAuth トークン（`cloud-platform` スコープ）で Cloud Build API を直接呼んでいました。この方式では、スプレッドシートの編集者がスクリプトを書き換えて、メニューを押した管理者のトークンを外部に送信できてしまいます。スプレッドシートに紐付いたスクリプトは編集者が誰でも変更できるためです。**`gas/main.js` に `ScriptApp.getOAuthToken()` を再び持ち込まないでください。**
+
 ### セットアップ
 
-1. 対象のスプレッドシートのメニューから **[拡張機能] > [Apps Script]** を開きます。
-2. `gas/main.js` の内容をエディタにコピー＆ペーストします。
-3. スクリプト内の以下の変数を、自身の環境に合わせて書き換えます：
-   - `PROJECT_ID`: Google Cloud のプロジェクトID
-   - `TRIGGER_ID`: Cloud Build のトリガーID
-4. 保存してスプレッドシートをリロードすると、メニューに **[🤖 Makasete AI]** が追加されます。
+1. Webhook の認証シークレットを登録します（値は任意のランダム文字列）。
+   ```bash
+   openssl rand -base64 32 | tr -d '\n' | gcloud secrets versions add makasete-ai-cloudbuild-webhook --data-file=-
+   ```
+   登録した値は次の手順で使うため、控えておいてください。
+2. Cloud Build API だけに制限した API キーを作成します。Google Cloud コンソールの **[APIとサービス] > [認証情報]** から作成し、「APIの制限」で **Cloud Build API** のみを選びます。
+3. 対象のスプレッドシートのメニューから **[拡張機能] > [Apps Script]** を開きます。
+4. `gas/main.js` と `gas/appsscript.json` の内容をエディタにコピー＆ペーストします（`appsscript.json` は「プロジェクトの設定」でマニフェストの表示を有効にすると編集できます）。
+5. **[プロジェクトの設定] > [スクリプト プロパティ]** に次の 4 つを登録します。
+   | キー | 値 |
+   | --- | --- |
+   | `PROJECT_ID` | Google Cloud のプロジェクトID |
+   | `TRIGGER_ID` | `terraform apply` の出力 `cloudbuild_webhook_trigger_ids` の値 |
+   | `WEBHOOK_API_KEY` | 手順 2 で作成した API キー |
+   | `WEBHOOK_SECRET` | 手順 1 で登録したシークレットの値 |
+6. 保存してスプレッドシートをリロードすると、メニューに **[🤖 Makasete AI]** が追加されます。
+
+> **注意**: スクリプト プロパティはスプレッドシートの編集者が閲覧できます。そのため編集者はデプロイを実行できます。これは想定どおりの運用です（以前のように GCP 全体を操作できる状態ではありません）。鍵を入れ替えたいときは、手順 1 のコマンドで新しいバージョンを登録し、スクリプト プロパティを更新してください。
 
 ### 使い方
 

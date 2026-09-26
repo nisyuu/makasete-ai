@@ -43,3 +43,13 @@ variable "github_repository" {
   type        = string
   description = "The GitHub repository in the format owner/name (e.g., nisyuu/makasete-ai)"
 }
+
+variable "cloudbuild_webhook_secret_version" {
+  type        = string
+  description = <<-EOT
+    Webhook の認証シークレットのバージョン。値そのものは Terraform では扱わず、
+    gcloud secrets versions add で登録する（リポジトリ直下の README.md「デプロイ」を参照）。
+    "latest" のままにすると、鍵を入れ替えてもトリガーの再適用が不要になる。
+  EOT
+  default     = "latest"
+}
