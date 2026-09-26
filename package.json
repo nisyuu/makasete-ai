@@ -24,10 +24,10 @@
     "@elevenlabs/elevenlabs-js": "^2.68.0",
     "@google/generative-ai": "^0.24.1",
     "cors": "^2.8.6",
-    "dotenv": "^17.4.2",
+    "dotenv": "^18.0.3",
     "express": "^5.2.1",
     "express-rate-limit": "^8.7.0",
-    "googleapis": "^178.1.1",
+    "googleapis": "^181.0.0",
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3"
   },
@@ -49,7 +49,7 @@
     "nodemon": "^3.1.14",
     "ts-node": "^10.9.2",
     "tsx": "^4.23.15",
-    "typescript": "^6.0.3",
+    "typescript": "^7.0.2",
     "typescript-eslint": "^8.70.1",
     "vite": "^8.3.0",
     "vitest": "^5.0.1"
