@@ -32,8 +32,6 @@ GEMINI.md
 LICENSE
 Dockerfile
 .dockerignore
-.clasp.json
-gas/
 docs/
 coverage/
 .claude/

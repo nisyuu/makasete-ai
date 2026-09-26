@@ -36,7 +36,7 @@ resource "google_service_account_iam_member" "cloudbuild_service_agent_user" {
 resource "google_cloudbuild_trigger" "makasete_server_deploy" {
   for_each    = var.makasete_servers
   name        = "makasete-ai-deploy-${each.key}"
-  description = "Manual build trigger for ${each.key} (Invoked via GAS)"
+  description = "Manual build trigger for ${each.key} (Invoked from the platform dashboard)"
   location    = "global"
 
   github {
