@@ -13,7 +13,8 @@ import {
 } from "./services/sheets";
 import { ChatService, resolveRequestId } from "./services/chat";
 import { isOriginAllowed, parseAllowedOrigins } from "./utils/origin";
-import { resolveClientIp } from "./utils/clientIp";
+import { resolveClientIp, toRateLimitKey } from "./utils/clientIp";
+import { ConnectionCounter } from "./utils/connectionCounter";
 import { TokenBucketLimiter } from "./utils/rateLimiter";
 import { installProcessHandlers } from "./utils/processHandlers";
 
@@ -95,7 +96,7 @@ const io = new Server(httpServer, {
 });
 
 // Security: Simple Socket.io rate limiting
-const socketConnections = new Map<string, number>();
+const socketConnections = new ConnectionCounter(5);
 
 // Security: user-input は 1 件ごとに LLM ストリームと文単位の TTS を発火させ、
 // そのまま課金につながる。接続単位と IP 単位の両方で上限を設ける。
@@ -118,21 +119,38 @@ const limiterPruneTimer = setInterval(
 );
 limiterPruneTimer.unref();
 
-function getClientIp(socket: Socket): string {
-  return resolveClientIp(
-    socket.handshake.headers["x-forwarded-for"],
-    socket.handshake.address,
-    TRUSTED_PROXY_COUNT,
+/**
+ * 上限のキーに使うクライアント識別子。IPv6 は /56 単位にまとめる。
+ * アドレスそのものを使うと、/64 を持つ相手が送信元を変えるだけで上限を
+ * すり抜けられる。
+ */
+function getClientKey(socket: Socket): string {
+  return toRateLimitKey(
+    resolveClientIp(
+      socket.handshake.headers["x-forwarded-for"],
+      socket.handshake.address,
+      TRUSTED_PROXY_COUNT,
+    ),
   );
 }
 
 io.use((socket, next) => {
-  const clientIp = getClientIp(socket);
-  const count = socketConnections.get(clientIp) || 0;
-  if (count >= 5) {
+  const clientKey = getClientKey(socket);
+  const release = socketConnections.acquire(clientKey);
+  if (!release) {
     return next(new Error("Too many connections"));
   }
-  socketConnections.set(clientIp, count + 1);
+
+  // 解放は engine.io の接続が閉じたときに行う。ミドルウェアを通った直後に
+  // 接続が閉じていると socket.io は connection も disconnect も発火させずに
+  // socket を捨てるため、disconnect だけに頼ると数えた分が永久に残り、
+  // 数回繰り返すだけでその IP は接続できなくなる。
+  socket.conn.once("close", release);
+  // すでに閉じ終わっていた場合は close を受け取れないので、その場で解放する
+  if (socket.conn.readyState !== "open") {
+    release();
+  }
+
   next();
 });
 
@@ -194,12 +212,34 @@ app.use(apiLimiter);
 // NODE_ENV=production 以外だと err.stack を返し、絶対パスなどの内部情報が漏れる。
 app.use((err: unknown, req: Request, res: Response, next: NextFunction) => {
   const message = err instanceof Error ? err.message : String(err);
-  console.error("[HTTP] Unhandled error:", message);
   if (res.headersSent) {
     return next(err);
   }
+
+  // 不正な JSON、サイズ超過、不正な URL エンコードなどは呼び出し側の誤りなので、
+  // 500 ではなく本来のステータスで返す（本文は汎用メッセージのみ）。
+  const status = getClientErrorStatus(err);
+  if (status !== null) {
+    return res.status(status).json({ error: "Bad request" });
+  }
+
+  console.error("[HTTP] Unhandled error:", message);
   res.status(500).json({ error: "Internal server error" });
 });
+
+/** エラーが 4xx を指しているならそのステータスを返す。 */
+function getClientErrorStatus(err: unknown): number | null {
+  if (err === null || typeof err !== "object") return null;
+  const candidate = err as { status?: unknown; statusCode?: unknown };
+  const value =
+    typeof candidate.status === "number"
+      ? candidate.status
+      : typeof candidate.statusCode === "number"
+        ? candidate.statusCode
+        : null;
+  if (value === null) return null;
+  return value >= 400 && value < 500 ? value : null;
+}
 
 // Initialize caching
 fetchAllSheets().then(() => {
@@ -209,7 +249,7 @@ fetchAllSheets().then(() => {
 // WebSocket logic
 io.on("connection", (socket) => {
   const chatService = new ChatService();
-  const clientIp = getClientIp(socket);
+  const clientKey = getClientKey(socket);
 
   socket.on(
     "user-input",
@@ -221,7 +261,7 @@ io.on("connection", (socket) => {
     }) => {
       if (
         !socketEventLimiter.tryConsume(socket.id) ||
-        !ipEventLimiter.tryConsume(clientIp)
+        !ipEventLimiter.tryConsume(clientKey)
       ) {
         const requestId =
           data !== null && typeof data === "object"
@@ -247,13 +287,8 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => {
     // 聞き手がいなくなった生成を打ち切り、Gemini の課金を止める
     chatService.dispose();
+    // 接続数の解放は io.use で登録した conn の "close" が行う
     socketEventLimiter.release(socket.id);
-    const count = socketConnections.get(clientIp);
-    if (count && count > 1) {
-      socketConnections.set(clientIp, count - 1);
-    } else {
-      socketConnections.delete(clientIp);
-    }
   });
 });
 

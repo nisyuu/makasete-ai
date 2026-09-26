@@ -1,5 +1,30 @@
 import { describe, it, expect } from 'vitest';
-import { resolveClientIp } from './clientIp';
+import { resolveClientIp, toRateLimitKey } from './clientIp';
+
+describe('toRateLimitKey', () => {
+    it('should keep IPv4 addresses as they are', () => {
+        expect(toRateLimitKey('203.0.113.5')).toBe('203.0.113.5');
+    });
+
+    it('should group IPv6 addresses so a /64 holder cannot bypass the limits', () => {
+        // 送信元アドレスを変えるだけで上限を回避できないよう、まとめて数える
+        const a = toRateLimitKey('2001:db8:1:2:3:4:5:6');
+        const b = toRateLimitKey('2001:db8:1:2:ffff::1');
+        expect(a).toBe(b);
+    });
+
+    it('should separate different IPv6 prefixes', () => {
+        expect(toRateLimitKey('2001:db8:1::1')).not.toBe(toRateLimitKey('2001:db8:99::1'));
+    });
+
+    it('should normalize IPv4-mapped IPv6 addresses to IPv4', () => {
+        expect(toRateLimitKey('::ffff:203.0.113.5')).toBe('203.0.113.5');
+    });
+
+    it('should fall back to the raw value for unparsable input', () => {
+        expect(toRateLimitKey('not-an-ip')).toBe('not-an-ip');
+    });
+});
 
 describe('resolveClientIp', () => {
     const remote = '10.0.0.1';
