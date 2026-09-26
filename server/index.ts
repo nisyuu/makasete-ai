@@ -51,9 +51,11 @@ const logProxyHeaders = config.logProxyHeaders
 const allowedOrigins = parseAllowedOrigins(process.env.ALLOWED_ORIGINS);
 
 if (allowedOrigins === ALLOW_ALL_ORIGINS) {
-  console.warn(
-    "[config] ALLOWED_ORIGINS is not set: any site can connect to this server " +
-      "and spend the LLM/TTS budget. Set it to the origins that embed the widget.",
+  // 埋め込み先を限定しない運用ではこれが正しい状態なので、警告ではなく事実として記録する。
+  // Origin の照合が無効な間、費用の歯止めは IP 単位のレート制限と同時生成数の上限だけになる。
+  console.info(
+    "[config] ALLOWED_ORIGINS allows every origin. Origin checks are disabled; " +
+      "rate limits and MAX_CONCURRENT_GENERATIONS are the only cost guards.",
   );
 }
 

@@ -32,17 +32,13 @@ variable "allowed_origins" {
   type        = string
   description = <<-EOT
     ウィジェットの埋め込みを許可するサイトの origin をカンマ区切りで指定する。
-    既定値は置かない。未設定のまま apply できると、任意の第三者サイトが接続して LLM と TTS の利用料を消費できる状態で本番が動いてしまう。
+    埋め込み先を限定しない運用では "*" を指定する。その場合 Origin の照合は行われないため、費用の歯止めは IP 単位のレート制限と同時生成数の上限だけになる。
+    既定値は置かない。どちらの運用なのかを tfvars で明示させ、意図しない全許可を防ぐため。
   EOT
 
   validation {
-    condition     = !contains(split(",", replace(var.allowed_origins, " ", "")), "*")
-    error_message = "allowed_origins に \"*\" は指定できません。埋め込み先の origin を明示してください。"
-  }
-
-  validation {
     condition     = length(trimspace(var.allowed_origins)) > 0
-    error_message = "allowed_origins を指定してください（例: https://your-shop.example）。"
+    error_message = "allowed_origins を指定してください（埋め込み先を限定しない場合は \"*\"）。"
   }
 }
 
