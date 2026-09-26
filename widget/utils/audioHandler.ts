@@ -155,7 +155,12 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
     ) {
       rawData = new Uint8Array((content as BufferData).data).buffer;
     } else if (content instanceof Uint8Array) {
-      rawData = content.buffer as ArrayBuffer;
+      // .buffer をそのまま渡すと、大きなバッファの一部を指すビューだった場合に
+      // 前後の無関係なバイトまで decode してしまい失敗する。
+      rawData = content.buffer.slice(
+        content.byteOffset,
+        content.byteOffset + content.byteLength,
+      ) as ArrayBuffer;
     } else {
       console.warn("[MakaseteAI] Unexpected audio format");
       return;

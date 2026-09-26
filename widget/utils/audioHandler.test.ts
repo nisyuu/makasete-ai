@@ -45,7 +45,7 @@ class MockAudioContext {
         createdSources.push(s);
         return s;
     });
-    decodeAudioData = vi.fn(() =>
+    decodeAudioData = vi.fn((_buffer: ArrayBuffer) =>
         decodeShouldFail ? Promise.reject(new Error('decode fail')) : Promise.resolve({}),
     );
     resume = vi.fn(async () => {
@@ -143,6 +143,23 @@ describe('initAudioHandler', () => {
             handler.handleAudioChunk(new Uint8Array([1, 2, 3]));
             await flush();
             expect(createdSources).toHaveLength(1);
+        });
+
+        it('should decode only the view when given a Uint8Array over a larger buffer', async () => {
+            // 大きなバッファの一部を指すビューを .buffer のまま渡すと、前後の
+            // 無関係なバイトまで decode してしまい失敗する。
+            const backing = new Uint8Array([9, 9, 1, 2, 3, 9, 9]);
+            const view = backing.subarray(2, 5);
+            const { handler } = setup();
+            handler.initAudioContext();
+            const ctx = (window as unknown as { __lastCtx?: MockAudioContext }).__lastCtx;
+
+            handler.handleAudioChunk(view);
+            await flush();
+
+            const passed = ctx!.decodeAudioData.mock.calls[0][0] as ArrayBuffer;
+            expect(passed.byteLength).toBe(3);
+            expect(Array.from(new Uint8Array(passed))).toEqual([1, 2, 3]);
         });
 
         it('should warn and ignore an unexpected format', async () => {
