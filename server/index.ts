@@ -15,6 +15,8 @@ import { ChatService, resolveRequestId } from "./services/chat";
 import { isOriginAllowed, parseAllowedOrigins } from "./utils/origin";
 import { resolveClientIp, toRateLimitKey } from "./utils/clientIp";
 import { ConnectionCounter } from "./utils/connectionCounter";
+import { ConcurrencyLimiter } from "./utils/concurrencyLimiter";
+import { createProxyHeaderLogger } from "./utils/proxyDiagnostics";
 import { TokenBucketLimiter } from "./utils/rateLimiter";
 import { installProcessHandlers } from "./utils/processHandlers";
 
@@ -29,8 +31,18 @@ if (missingConfig.length > 0) {
 const app = express();
 
 // Security: Trust proxy for Cloud Run to get correct client IP for rate limiting
-const TRUSTED_PROXY_COUNT = 1;
+//
+// 段数は構成によって変わる（Cloud Run 直なら 1、前段に App Hosting や外部 LB が
+// あれば 2）。合っていないと全利用者が同じキーにまとめられ、同時接続やレート制限の
+// 枠をサイト全体で共有してしまうため、環境変数で設定できるようにしている。
+// 実際の値は LOG_PROXY_HEADERS=true でヘッダを確認して決める。
+const TRUSTED_PROXY_COUNT = config.trustedProxyCount;
 app.set("trust proxy", TRUSTED_PROXY_COUNT);
+
+// 診断ログ: XFF のホップ数が想定と違えば警告する（既定では無効）
+const logProxyHeaders = config.logProxyHeaders
+  ? createProxyHeaderLogger({ expectedHopCount: TRUSTED_PROXY_COUNT })
+  : null;
 
 // Security: Use environment variable for allowed origins
 const allowedOrigins = parseAllowedOrigins(process.env.ALLOWED_ORIGINS);
@@ -96,7 +108,11 @@ const io = new Server(httpServer, {
 });
 
 // Security: Simple Socket.io rate limiting
-const socketConnections = new ConnectionCounter(5);
+const socketConnections = new ConnectionCounter(config.maxConnectionsPerClient);
+
+// Security: クライアントの識別に失敗しても効く歯止め。LLM と TTS の同時呼び出しを
+// プロセス全体で抑える。
+const generationLimiter = new ConcurrencyLimiter(config.maxConcurrentGenerations);
 
 // Security: user-input は 1 件ごとに LLM ストリームと文単位の TTS を発火させ、
 // そのまま課金につながる。接続単位と IP 単位の両方で上限を設ける。
@@ -125,13 +141,16 @@ limiterPruneTimer.unref();
  * すり抜けられる。
  */
 function getClientKey(socket: Socket): string {
-  return toRateLimitKey(
+  const forwardedFor = socket.handshake.headers["x-forwarded-for"];
+  const key = toRateLimitKey(
     resolveClientIp(
-      socket.handshake.headers["x-forwarded-for"],
+      forwardedFor,
       socket.handshake.address,
       TRUSTED_PROXY_COUNT,
     ),
   );
+  logProxyHeaders?.("socket", forwardedFor, key);
+  return key;
 }
 
 io.use((socket, next) => {
@@ -156,6 +175,14 @@ io.use((socket, next) => {
 
 // Middleware
 app.use(express.json({ limit: "64kb" }));
+
+// 診断ログ: HTTP 側でも XFF の形を確認できるようにする（既定では無効）
+if (logProxyHeaders) {
+  app.use((req: Request, _res: Response, next: NextFunction) => {
+    logProxyHeaders("http", req.headers["x-forwarded-for"], req.ip ?? "unknown");
+    next();
+  });
+}
 
 // Static files (Widget)
 app.use(
@@ -274,13 +301,26 @@ io.on("connection", (socket) => {
         return;
       }
 
+      // プロセス全体の同時生成数で頭打ちにする。クライアントの識別が構成に
+      // 依存するのに対し、これは常に効く歯止めになる。
+      const releaseSlot = generationLimiter.tryAcquire();
+      if (!releaseSlot) {
+        socket.emit("error", {
+          message: "The assistant is busy right now. Please try again shortly.",
+        });
+        return;
+      }
+
       // handleUserInput は async。await も catch もしないと、投げられた例外が
       // unhandled rejection となり Node 24 の既定設定ではプロセスごと落ちる。
-      void chatService.handleUserInput(socket, data).catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error("[Socket] handleUserInput failed:", message);
-        socket.emit("error", { message: "Internal server error occurred." });
-      });
+      void chatService
+        .handleUserInput(socket, data)
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error);
+          console.error("[Socket] handleUserInput failed:", message);
+          socket.emit("error", { message: "Internal server error occurred." });
+        })
+        .finally(releaseSlot);
     },
   );
 
