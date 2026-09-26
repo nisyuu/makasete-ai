@@ -192,8 +192,24 @@ ECサイトの `</body>` タグの直前に以下のスクリプトを追加し�
 スプレッドシートの各シート（`prompt`を除く）のデータは、以下のエンドポイントからJSON形式で取得できます。
 
 - **URL**: `GET /api/:sheetName`
-- **例**: `/api/books`, `/api/news`
-- **レスポンス**: シートの全行データ（最大100行）をJSON配列で返します。存在しないシート名を指定した場合は `404 Not Found` となります。
+- **例**: `/api/items`, `/api/news`
+- **レスポンス**: シートの全行データ（最大100行）をJSON配列で返します。存在しないシート名や公開対象外のシートを指定した場合は `404 Not Found` となります。
+
+### 公開するシートの指定
+
+環境変数 `PUBLIC_SHEETS` に、このエンドポイントから返すシート名をカンマ区切りで指定します。未設定の場合は `settings,items,news` です。
+
+| 指定 | 挙動 |
+| :--- | :--- |
+| 未設定 | `settings` / `items` / `news` のみ公開 |
+| `settings,items,faqs` | 列挙したシートのみ公開 |
+| `*` | `prompt` と `private_*` 以外のすべてを公開 |
+
+`prompt` と `private_` 付きのシートは、`*` を指定しても公開されません。
+
+列挙方式にしているのは、運営者が社内向けのシートを追加したときに、`private_` の付け忘れだけで内容が公開されるのを防ぐためです。
+
+> **注意**: テナントごとの Cloud Run サービスは別リポジトリ（`makasete-ai-platform`）の Cloud Build トリガーからデプロイされ、その際に `--set-env-vars` で環境変数が置き換わります。そのためテナント単位で `PUBLIC_SHEETS` を指定するには、platform 側のトリガー定義に substitution を追加する必要があります。現状はどのテナントも既定値（`settings,items,news`）で動作します。
 
 ## デプロイ (Google Cloud Run)
 
