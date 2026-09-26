@@ -123,7 +123,28 @@ function buildWidgetMarkup(placeholder: string, helperText: string): string {
     `;
 }
 
+/** ウィジェットのホスト要素の id。二重埋め込みの検知に使う */
+const HOST_ELEMENT_ID = "makasete-ai-widget-host";
+
 export function initChatWidget(config: WidgetConfig = {}): void {
+  // 同じスクリプトが 2 回読み込まれると、ホスト要素が重複してソケットも 2 本張られる。
+  // サーバー側には接続数の上限があるため、2 本目以降は無駄に枠を消費する。
+  if (document.getElementById(HOST_ELEMENT_ID)) {
+    console.warn("[MakaseteAI] Widget is already mounted; skipping.");
+    return;
+  }
+
+  // タグマネージャ等で <head> に同期挿入されると document.body がまだ無い。
+  // そのまま appendChild すると TypeError でウィジェット全体が起動しない。
+  if (!document.body) {
+    document.addEventListener(
+      "DOMContentLoaded",
+      () => initChatWidget(config),
+      { once: true },
+    );
+    return;
+  }
+
   const {
     serverUrl = resolveServerUrl(),
     title = "AIアシスタント",
@@ -139,7 +160,7 @@ export function initChatWidget(config: WidgetConfig = {}): void {
 
   // Shadow DOM for style isolation
   const host = document.createElement("div");
-  host.id = "makasete-ai-widget-host";
+  host.id = HOST_ELEMENT_ID;
   document.body.appendChild(host);
   const shadow = host.attachShadow({ mode: "open" });
 

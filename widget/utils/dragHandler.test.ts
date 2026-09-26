@@ -98,4 +98,95 @@ describe('initDragHandler', () => {
         document.dispatchEvent(new MouseEvent('mousemove', { clientX: 200, clientY: 200, bubbles: true }));
         expect(onDragStateChange).not.toHaveBeenCalled();
     });
+
+    const tick = () => new Promise((r) => setTimeout(r, 0));
+
+    it('should clear the dragging state after the click that follows mouseup', async () => {
+        // ランチャーの click は isDragging を見て開閉を抑止する。mouseup で即座に
+        // false へ戻すとドラッグのたびにチャットが開く。click 判定の後に戻す。
+        initDragHandler(container, [header], launcherBtn, onDragStateChange);
+
+        header.dispatchEvent(new MouseEvent('mousedown', { clientX: 100, clientY: 100, bubbles: true }));
+        document.dispatchEvent(new MouseEvent('mousemove', { clientX: 200, clientY: 200, bubbles: true }));
+        onDragStateChange.mockClear();
+
+        document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+        expect(onDragStateChange).not.toHaveBeenCalled();
+
+        await tick();
+        expect(onDragStateChange).toHaveBeenCalledWith(false);
+    });
+
+    it('should not fire a state change on mouseup when no drag happened', async () => {
+        initDragHandler(container, [header], launcherBtn, onDragStateChange);
+        header.dispatchEvent(new MouseEvent('mousedown', { clientX: 100, clientY: 100, bubbles: true }));
+        onDragStateChange.mockClear();
+
+        document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+        await tick();
+        expect(onDragStateChange).not.toHaveBeenCalled();
+    });
+
+    it('should keep the widget inside the viewport', () => {
+        // クランプしないと画面外まで運べてしまい、リロードするまで操作不能になる
+        initDragHandler(container, [header], launcherBtn, onDragStateChange);
+
+        header.dispatchEvent(new MouseEvent('mousedown', { clientX: 100, clientY: 100, bubbles: true }));
+        document.dispatchEvent(new MouseEvent('mousemove', { clientX: 9000, clientY: 9000, bubbles: true }));
+
+        expect(parseFloat(container.style.left)).toBeLessThanOrEqual(window.innerWidth);
+        expect(parseFloat(container.style.top)).toBeLessThanOrEqual(window.innerHeight);
+    });
+
+    it('should not allow negative positions', () => {
+        initDragHandler(container, [header], launcherBtn, onDragStateChange);
+
+        header.dispatchEvent(new MouseEvent('mousedown', { clientX: 100, clientY: 100, bubbles: true }));
+        document.dispatchEvent(new MouseEvent('mousemove', { clientX: -500, clientY: -500, bubbles: true }));
+
+        expect(container.style.left).toBe('0px');
+        expect(container.style.top).toBe('0px');
+    });
+
+    it('should stop dragging on touchcancel', () => {
+        // OS にタッチを奪われたときにリスナーが残り続けるのを防ぐ
+        initDragHandler(container, [header], launcherBtn, onDragStateChange);
+
+        header.dispatchEvent(
+            new TouchEvent('touchstart', {
+                bubbles: true,
+                touches: [{ clientX: 50, clientY: 50 } as Touch],
+            }),
+        );
+        document.dispatchEvent(
+            new TouchEvent('touchmove', {
+                bubbles: true,
+                touches: [{ clientX: 100, clientY: 100 } as Touch],
+            }),
+        );
+        const movedLeft = container.style.left;
+
+        document.dispatchEvent(new TouchEvent('touchcancel', { bubbles: true }));
+        document.dispatchEvent(
+            new TouchEvent('touchmove', {
+                bubbles: true,
+                touches: [{ clientX: 300, clientY: 300 } as Touch],
+            }),
+        );
+
+        expect(container.style.left).toBe(movedLeft);
+    });
+
+    it('should re-clamp the position when the viewport shrinks', () => {
+        initDragHandler(container, [header], launcherBtn, onDragStateChange);
+
+        header.dispatchEvent(new MouseEvent('mousedown', { clientX: 100, clientY: 100, bubbles: true }));
+        document.dispatchEvent(new MouseEvent('mousemove', { clientX: 900, clientY: 300, bubbles: true }));
+        document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+
+        setWindowWidth(400);
+        window.dispatchEvent(new Event('resize'));
+
+        expect(parseFloat(container.style.left)).toBeLessThanOrEqual(400);
+    });
 });

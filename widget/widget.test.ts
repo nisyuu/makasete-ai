@@ -115,6 +115,33 @@ describe('initChatWidget (rich UI)', () => {
         expect(input.placeholder).toBe('質問を入力...');
     });
 
+    describe('mounting', () => {
+        it('should not mount twice when the script is loaded again', () => {
+            // ホスト要素が重複するとソケットも 2 本張られ、接続数の枠を無駄に使う
+            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+            initChatWidget();
+            initChatWidget();
+
+            expect(document.querySelectorAll('#makasete-ai-widget-host')).toHaveLength(1);
+            expect(warnSpy).toHaveBeenCalled();
+            warnSpy.mockRestore();
+        });
+
+        it('should wait for DOMContentLoaded when document.body is not ready', () => {
+            // タグマネージャ等で head に同期挿入されると body がまだ無い
+            const body = document.body;
+            Object.defineProperty(document, 'body', { value: null, configurable: true });
+
+            expect(() => initChatWidget()).not.toThrow();
+            expect(document.getElementById('makasete-ai-widget-host')).toBeNull();
+
+            Object.defineProperty(document, 'body', { value: body, configurable: true });
+            document.dispatchEvent(new Event('DOMContentLoaded'));
+
+            expect(document.getElementById('makasete-ai-widget-host')).not.toBeNull();
+        });
+    });
+
     it('should render the initial greeting message after settings load', async () => {
         initChatWidget();
         await flushAsync();
