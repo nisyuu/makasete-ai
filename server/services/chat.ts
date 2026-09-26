@@ -15,6 +15,24 @@ import { getRecommendations } from "./recommendations";
 import { isProductCardsEnabled } from "./settings";
 import { resolveLanguage } from "../utils/language";
 
+/** リクエスト ID を付けて応答イベントを送る関数 */
+type EmitFn = (event: string, payload?: Record<string, unknown>) => void;
+
+/**
+ * クライアントが付けたリクエスト ID を検証する。
+ * 任意の値をそのまま送り返すと巨大なペイロードの反射に使われうるので、
+ * 短い文字列か有限の数値だけを受け付ける。
+ */
+export function resolveRequestId(value: unknown): string | number | undefined {
+  if (typeof value === "string" && value.length > 0 && value.length <= 64) {
+    return value;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  return undefined;
+}
+
 export class ChatService {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private chatHistory: any[] = [];
@@ -22,10 +40,28 @@ export class ChatService {
   // (cancels) any response still being generated on the same socket, so a user
   // interrupting the bot (barge-in) does not produce overlapping responses.
   private activeGeneration = 0;
+  // 生成中の Gemini リクエストを打ち切るためのコントローラ。新しい入力や
+  // 切断のときに abort し、不要になった生成の課金を止める。
+  private activeAbort: AbortController | null = null;
+  // 応答がまだ返っていない user ターン。割り込まれた場合は履歴から外す。
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private pendingUserTurn: any = null;
+
+  /** 接続が切れたときに呼ぶ。生成中のリクエストを打ち切り、以後の送出を止める。 */
+  dispose(): void {
+    this.activeGeneration++;
+    this.activeAbort?.abort();
+    this.activeAbort = null;
+  }
 
   async handleUserInput(
     socket: Socket,
-    data: { text: string; isVoiceInput: boolean; language?: string },
+    data: {
+      text: string;
+      isVoiceInput: boolean;
+      language?: string;
+      requestId?: unknown;
+    },
   ): Promise<void> {
     // ペイロードを信用しない。
     // null / undefined / プリミティブを分割代入すると TypeError で Promise が reject し、呼び出し側が拾い損ねるとプロセスごと落ちる。
@@ -35,11 +71,24 @@ export class ChatService {
       return;
     }
 
+    // クライアントが付けたリクエスト ID を応答イベントにそのまま付けて返す。
+    // クライアントは自分が待っている ID と違うイベント（割り込まれた古い応答の
+    // 取り残し）を捨てられる。ID が無い古いクライアントには従来どおりの形で返す。
+    const requestId = resolveRequestId(data.requestId);
+    const emit: EmitFn = (event, payload) => {
+      if (requestId === undefined) {
+        if (payload === undefined) socket.emit(event);
+        else socket.emit(event, payload);
+        return;
+      }
+      socket.emit(event, { ...(payload ?? {}), requestId });
+    };
+
     const { text, isVoiceInput } = data;
     const language = resolveLanguage(data.language);
 
     if (!text || typeof text !== "string" || text.length > 1000) {
-      socket.emit("error", { message: "Input is invalid" });
+      emit("error", { message: "Input is invalid" });
       return;
     }
 
@@ -48,7 +97,26 @@ export class ChatService {
     const generation = ++this.activeGeneration;
     const isSuperseded = (): boolean => generation !== this.activeGeneration;
 
-    this.chatHistory.push({ role: "user", parts: [{ text }] });
+    // 前の入力の生成がまだ続いていれば打ち切る（Gemini 側の課金も止まる）。
+    this.activeAbort?.abort();
+    const abortController = new AbortController();
+    this.activeAbort = abortController;
+
+    // 割り込まれた前の入力の user ターンは、応答が無いまま履歴に残ると
+    // user が連続する不自然な履歴になるので外す。
+    if (this.pendingUserTurn) {
+      this.removeFromHistory(this.pendingUserTurn);
+      this.pendingUserTurn = null;
+    }
+
+    // Gemini には「これまでの履歴」と「今回の発話」を分けて渡す。今回の発話を
+    // 履歴に含めたまま sendMessageStream にも渡すと、同じ発話が 2 回送られて
+    // 入力トークンの課金が倍になる。
+    const priorHistory = [...this.chatHistory];
+
+    const userTurn = { role: "user", parts: [{ text }] };
+    this.chatHistory.push(userTurn);
+    this.pendingUserTurn = userTurn;
     if (this.chatHistory.length > 20) {
       this.chatHistory.splice(0, 2);
     }
@@ -57,7 +125,13 @@ export class ChatService {
 
     try {
       const allData = getAllSheetData();
-      const stream = await generateResponseStream(text, allData, this.chatHistory, language);
+      const stream = await generateResponseStream(
+        text,
+        allData,
+        priorHistory,
+        language,
+        abortController.signal,
+      );
       const ttsService = getTTSService();
 
       let fullResponseText = "";
@@ -71,7 +145,7 @@ export class ChatService {
         const uiText = stripTags(sentence);
 
         if (isVoiceInput) {
-          socket.emit("audio-chunk", { type: "text", content: uiText });
+          emit("audio-chunk", { type: "text", content: uiText });
 
           // Start TTS immediately (concurrent with LLM streaming and other sentences)
           const streamPromise = this.startEagerTTSStream(sentence, ttsService, language);
@@ -98,10 +172,10 @@ export class ChatService {
                   console.error("[TTS] Failed to discard stream:", message);
                 });
             }
-            return this.drainStreamToSocket(socket, streamPromise);
+            return this.drainStreamToSocket(emit, streamPromise);
           });
         } else {
-          socket.emit("text-chunk", { content: uiText });
+          emit("text-chunk", { content: uiText });
         }
       };
 
@@ -135,6 +209,8 @@ export class ChatService {
         role: "model",
         parts: [{ text: fullResponseText }],
       });
+      if (this.pendingUserTurn === userTurn) this.pendingUserTurn = null;
+      if (this.activeAbort === abortController) this.activeAbort = null;
 
       // Card display can be turned off from the spreadsheet's settings sheet.
       if (isProductCardsEnabled()) {
@@ -144,19 +220,32 @@ export class ChatService {
           responseText: fullResponseText,
         });
         if (recommendations.length > 0) {
-          socket.emit("recommendation", { products: recommendations });
+          emit("recommendation", { products: recommendations });
         }
       }
 
-      socket.emit("response-complete");
+      emit("response-complete");
     } catch (error: unknown) {
+      // 割り込み・切断で自分から abort した場合は想定内なのでログを出さない
+      if (isSuperseded()) return;
+
       const message = error instanceof Error ? error.message : String(error);
       console.error("Error processing input:", message);
-      // Only surface the error for the response the client is still expecting.
-      if (!isSuperseded()) {
-        socket.emit("error", { message: "Internal server error occurred." });
-      }
+
+      // 応答できなかった user ターンを履歴から外す。残すと次の入力で
+      // user が連続した履歴になる。
+      this.removeFromHistory(userTurn);
+      if (this.pendingUserTurn === userTurn) this.pendingUserTurn = null;
+      if (this.activeAbort === abortController) this.activeAbort = null;
+
+      emit("error", { message: "Internal server error occurred." });
     }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private removeFromHistory(turn: any): void {
+    const index = this.chatHistory.indexOf(turn);
+    if (index !== -1) this.chatHistory.splice(index, 1);
   }
 
   // Starts TTS generation eagerly (without awaiting the caller) and returns a
@@ -189,7 +278,7 @@ export class ChatService {
   // each "audio-chunk" as a self-contained MP3 via decodeAudioData, so we must
   // send one complete MP3 per sentence rather than partial slices.
   private async drainStreamToSocket(
-    socket: Socket,
+    emit: EmitFn,
     streamPromise: Promise<NodeJS.ReadableStream | null>,
   ): Promise<void> {
     const audioStream = await streamPromise;
@@ -206,7 +295,7 @@ export class ChatService {
         if (chunks.length > 0) {
           const full = Buffer.concat(chunks);
           if (full.length > 0) {
-            socket.emit("audio-chunk", { type: "audio", content: full });
+            emit("audio-chunk", { type: "audio", content: full });
           }
         }
         resolve();

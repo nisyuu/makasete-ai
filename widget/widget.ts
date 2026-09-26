@@ -6,6 +6,7 @@ import {
   getUIElements,
   updateInputActions,
   showTypingIndicator,
+  hideTypingIndicator,
   appendMessage,
   appendRecommendations,
   applyPrimaryColor,
@@ -273,7 +274,9 @@ export function initChatWidget(config: WidgetConfig = {}): void {
       );
     },
     onResponseComplete: () => {
-      els.input.focus();
+      // 応答が 1 文字も無いまま完了した場合でも、インジケータを残さない
+      hideTypingIndicator(els.timeline);
+      focusInputIfAppropriate();
     },
     onRecommendation: (products) => {
       appendRecommendations(els.timeline, products);
@@ -281,7 +284,36 @@ export function initChatWidget(config: WidgetConfig = {}): void {
     onConnect: () => {
       console.log("[MakaseteAI] Connected");
     },
+    onConnectionLost: (reason) => {
+      audio.resetAudioState();
+      const message =
+        reason === "connect-timeout"
+          ? isEn
+            ? "Could not connect to the server. Please check your connection and try again."
+            : "サーバーに接続できませんでした。通信環境を確認して、もう一度お試しください。"
+          : isEn
+            ? "The connection was lost. Please send your message again."
+            : "接続が切れました。お手数ですが、もう一度送信してください。";
+      // appendMessage はサーバー側の発言を追加するときにインジケータも消す
+      appendMessage(els.timeline, messageState, "makasete-server", message);
+    },
   });
+
+  /**
+   * 応答完了時に入力欄へフォーカスを戻す。ただし、ユーザーがホストページの
+   * 別の入力欄で作業していたらフォーカスを奪わない。タッチ端末ではフォーカス
+   * するとソフトキーボードが開いてしまうので戻さない。
+   */
+  function focusInputIfAppropriate(): void {
+    if (!els.chatWindow.classList.contains("open")) return;
+    // Shadow DOM 内の要素がフォーカスされていると document.activeElement は host になる
+    if (document.activeElement !== host) return;
+    const isTouch =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(pointer: coarse)").matches;
+    if (isTouch) return;
+    els.input.focus();
+  }
 
   // --- Send ---
   function sendMessage(isVoiceInput = false): void {
@@ -295,8 +327,10 @@ export function initChatWidget(config: WidgetConfig = {}): void {
     updateInputActions(els.input, els.sendBtn, els.micBtn);
     showTypingIndicator(els.timeline);
 
+    // 新しい質問を送ったら、前の応答の読み上げは止める（割り込み）。
+    // テキスト入力で送った場合も、前の応答の音声が鳴り続けないようにする。
+    audio.resetAudioState();
     if (useAudio) {
-      audio.resetAudioState();
       audio.resumeAudioContext().catch(console.error);
     }
 
@@ -354,27 +388,49 @@ export function initChatWidget(config: WidgetConfig = {}): void {
   // 初期表示（アイコン・タイトル）を状態に合わせて設定する
   updateAudioToggle();
 
+  // モバイルで開いている間は、ホストページの body のスクロールを止める。
+  // 開く前の値を覚えておき、閉じるときは画面幅に関係なく必ずその値に戻す。
+  // 開いた後に回転や拡大で幅が変わっても、スクロールが止まったまま
+  // 残らないようにするため。null はロックしていない状態を表す。
+  let savedBodyOverflow: string | null = null;
+
+  function lockBodyScroll(): void {
+    if (savedBodyOverflow !== null) return;
+    if (window.innerWidth > 600) return;
+    savedBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+  }
+
+  function unlockBodyScroll(): void {
+    if (savedBodyOverflow === null) return;
+    document.body.style.overflow = savedBodyOverflow;
+    savedBodyOverflow = null;
+  }
+
+  function openChatWindow(): void {
+    els.chatWindow.classList.add("open");
+    lockBodyScroll();
+    audio.resumeAudioContext().catch(console.error);
+  }
+
+  function closeChatWindow(): void {
+    els.chatWindow.classList.remove("open");
+    unlockBodyScroll();
+    audio.resetAudioState();
+  }
+
   els.launcherBtn.addEventListener("click", () => {
     if (isDragging) return; // ドラッグ中はトグルしない
-    const isOpen = els.chatWindow.classList.toggle("open");
-
-    // モバイルでは開いている間 body のスクロールを止める
-    if (window.innerWidth <= 600) {
-      document.body.style.overflow = isOpen ? "hidden" : "";
-    }
-
-    if (isOpen) {
-      audio.resumeAudioContext().catch(console.error);
+    if (els.chatWindow.classList.contains("open")) {
+      closeChatWindow();
     } else {
-      audio.resetAudioState();
+      openChatWindow();
     }
   });
 
   if (els.closeBtn) {
     els.closeBtn.addEventListener("click", () => {
-      els.chatWindow.classList.remove("open");
-      document.body.style.overflow = "";
-      audio.resetAudioState();
+      closeChatWindow();
     });
   }
 

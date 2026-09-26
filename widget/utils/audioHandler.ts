@@ -43,6 +43,9 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
   // 再生キュー
   const audioQueue: ArrayBuffer[] = [];
   let isPlaying = false;
+  // resetAudioState のたびに進める世代番号。decodeAudioData の完了を待って
+  // いる間にリセットされた場合、古い世代の音声を再生しないために使う。
+  let playbackGeneration = 0;
 
   // 音声認識
   let recognition: SpeechRecognition | null = null;
@@ -67,7 +70,11 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
 
   async function resumeAudioContext(): Promise<void> {
     initAudioContext();
-    if (audioContext && audioContext.state === "suspended") {
+    // iOS Safari は着信や Siri の後に "interrupted" という状態になる。
+    // "suspended" だけを見ていると復帰できず、以後の読み上げが無音になる。
+    // "running" でも "closed" でもなければ resume する。
+    const state = audioContext?.state as string | undefined;
+    if (audioContext && state !== "running" && state !== "closed") {
       await audioContext.resume();
     }
   }
@@ -83,6 +90,7 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
 
     isPlaying = true;
     const rawData = audioQueue.shift();
+    const generation = playbackGeneration;
 
     if (rawData) {
       try {
@@ -90,6 +98,13 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
         const audioBuffer = await audioContext.decodeAudioData(
           rawData.slice(0),
         );
+
+        // decode の待機中に resetAudioState された（新しいメッセージの送信、
+        // 読み上げ OFF、ウィンドウを閉じた）場合、この音声は古いので再生しない。
+        // isPlaying は新しい世代が使っているかもしれないので触らない。
+        if (generation !== playbackGeneration) {
+          return;
+        }
 
         // decode の待機中に録音が開始された場合は再生を中止する
         if (isRecording) {
@@ -114,6 +129,8 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
         source.start(0);
       } catch (e) {
         console.error("[MakaseteAI] Audio decode/play failed:", e);
+        // リセット後なら新しい世代の再生状態を壊さない
+        if (generation !== playbackGeneration) return;
         isPlaying = false;
         playNextInQueue();
       }
@@ -149,6 +166,8 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
   }
 
   function resetAudioState(): void {
+    // decode 待ちの音声を無効化する
+    playbackGeneration += 1;
     if (currentSource) {
       try {
         currentSource.stop();

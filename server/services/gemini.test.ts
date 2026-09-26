@@ -117,6 +117,12 @@ describe('Gemini service utilities', () => {
             sendMessageStream.mockResolvedValue({ stream: 'mock-stream' });
         });
 
+        it('should pass the abort signal to sendMessageStream when given', async () => {
+            const controller = new AbortController();
+            await generateResponseStream('Hello', new Map(), [], 'ja', controller.signal);
+            expect(sendMessageStream).toHaveBeenCalledWith('Hello', { signal: controller.signal });
+        });
+
         it('should start a chat and return the stream', async () => {
             const allData = new Map([['faq', [{ q: 'hi' }]]]);
             const stream = await generateResponseStream('Hello', allData, [], 'ja');
