@@ -7,9 +7,8 @@ export type SheetData = Record<string, string>;
 
 let sheetCache: Map<string, SheetData[]> = new Map();
 let systemPromptCache: string | null = null;
-// 取得が成功してキャッシュが使える状態かどうか。dataReadyPromise は「起動処理が
-// 終わった」ことしか表さないため、/health が空のキャッシュを ready と誤って
-// 報告しないようにフラグを分けている。
+// 取得が成功してキャッシュが使える状態かどうか。
+// dataReadyPromise は「起動処理が終わった」ことしか表さないため、/health が空のキャッシュを ready と誤って報告しないようにフラグを分けている。
 let dataReady = false;
 
 let resolveReady: () => void;
@@ -24,8 +23,7 @@ export function isDataReady(): boolean {
 
 /**
  * シート名を A1 記法の range として安全に埋め込む。
- * シート名に空白・記号・引用符が含まれていてもパースエラーにならないよう、
- * シングルクォートで囲み、内部の `'` は `''` にエスケープする。
+ * シート名に空白・記号・引用符が含まれていてもパースエラーにならないよう、シングルクォートで囲み、内部の `'` は `''` にエスケープする。
  */
 export function buildSheetRange(name: string): string {
     return `'${name.replace(/'/g, "''")}'`;

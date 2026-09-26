@@ -1,10 +1,8 @@
 /**
  * ALLOWED_ORIGINS の解析と Origin 照合。
  *
- * CORS ミドルウェアは Origin が一致しなくてもヘッダを付けずに通すだけで接続を
- * 拒否しない。Socket.IO の WebSocket 直結（`transports: ["websocket"]`）は
- * engine.io が Origin を検証しないため、`allowRequest` でこの関数を使って
- * ハンドシェイク自体を拒否する。
+ * CORS ミドルウェアは Origin が一致しなくてもヘッダを付けずに通すだけで接続を拒否しない。
+ * Socket.IO の WebSocket 直結（`transports: ["websocket"]`）は engine.io が Origin を検証しないため、`allowRequest` でこの関数を使ってハンドシェイク自体を拒否する。
  */
 
 /** `*`（全 origin 許可）を表す番兵 */
@@ -50,8 +48,8 @@ export function parseAllowedOrigins(
 export function normalizeOrigin(value: string): string | null {
   try {
     const { origin } = new URL(value);
-    // new URL("foo") は失敗するが、new URL("foo:bar") のような値は origin が
-    // "null" になる。これを許可リストに入れない。
+    // new URL("foo") は失敗するが、new URL("foo:bar") のような値は origin が "null" になる。
+    // これを許可リストに入れない。
     return origin === "null" ? null : origin;
   } catch {
     return null;
@@ -61,9 +59,8 @@ export function normalizeOrigin(value: string): string | null {
 /**
  * Origin ヘッダが許可リストに含まれるかを判定する。
  *
- * Origin ヘッダが無いリクエスト（同一 origin の fetch、curl、サーバー間通信）は
- * ブラウザの CORS 制約の対象外なので許可する。ここで防ぎたいのは「第三者サイトに
- * 埋め込まれたブラウザからの接続」であり、それは必ず Origin を送る。
+ * Origin ヘッダが無いリクエスト（同一 origin の fetch、curl、サーバー間通信）はブラウザの CORS 制約の対象外なので許可する。
+ * ここで防ぎたいのは「第三者サイトに埋め込まれたブラウザからの接続」であり、それは必ず Origin を送る。
  */
 export function isOriginAllowed(
   origin: string | undefined,

@@ -12,7 +12,11 @@ import {
   isDataReady,
 } from "./services/sheets";
 import { ChatService, resolveRequestId } from "./services/chat";
-import { isOriginAllowed, parseAllowedOrigins } from "./utils/origin";
+import {
+  ALLOW_ALL_ORIGINS,
+  isOriginAllowed,
+  parseAllowedOrigins,
+} from "./utils/origin";
 import { resolveClientIp, toRateLimitKey } from "./utils/clientIp";
 import { ConnectionCounter } from "./utils/connectionCounter";
 import { ConcurrencyLimiter } from "./utils/concurrencyLimiter";
@@ -32,9 +36,8 @@ const app = express();
 
 // Security: Trust proxy for Cloud Run to get correct client IP for rate limiting
 //
-// 段数は構成によって変わる（Cloud Run 直なら 1、前段に App Hosting や外部 LB が
-// あれば 2）。合っていないと全利用者が同じキーにまとめられ、同時接続やレート制限の
-// 枠をサイト全体で共有してしまうため、環境変数で設定できるようにしている。
+// 段数は構成によって変わる（Cloud Run 直なら 1、前段に App Hosting や外部 LB があれば 2）。
+// 合っていないと全利用者が同じキーにまとめられ、同時接続やレート制限の枠をサイト全体で共有してしまうため、環境変数で設定できるようにしている。
 // 実際の値は LOG_PROXY_HEADERS=true でヘッダを確認して決める。
 const TRUSTED_PROXY_COUNT = config.trustedProxyCount;
 app.set("trust proxy", TRUSTED_PROXY_COUNT);
@@ -47,9 +50,15 @@ const logProxyHeaders = config.logProxyHeaders
 // Security: Use environment variable for allowed origins
 const allowedOrigins = parseAllowedOrigins(process.env.ALLOWED_ORIGINS);
 
+if (allowedOrigins === ALLOW_ALL_ORIGINS) {
+  console.warn(
+    "[config] ALLOWED_ORIGINS is not set: any site can connect to this server " +
+      "and spend the LLM/TTS budget. Set it to the origins that embed the widget.",
+  );
+}
+
 // 1. CORS Middleware (Must be FIRST)
-// credentials は使わない: Cookie も Authorization も送らないため不要で、
-// origin "*" と併用するとブラウザ側でリクエストが拒否される。
+// credentials は使わない: Cookie も Authorization も送らないため不要で、origin "*" と併用するとブラウザ側でリクエストが拒否される。
 app.use(
   cors({
     origin: allowedOrigins,
@@ -61,9 +70,8 @@ app.use(
 // Security: Rate limiting
 //
 // ウィジェットは 1 ページ表示ごとに widget.js / /health / /api/settings を叩く。
-// 全ルートを一つの厳しい上限で縛ると、企業 NAT や CGNAT の背後にいる複数ユーザーが
-// 同一 IP とみなされて数十ページビューでウィジェットごと 429 になる。静的配信と
-// 読み取り API は緩く、それ以外は厳しく、と経路ごとに分ける。
+// 全ルートを一つの厳しい上限で縛ると、企業 NAT や CGNAT の背後にいる複数ユーザーが同一 IP とみなされて数十ページビューでウィジェットごと 429 になる。
+// 静的配信と読み取り API は緩く、それ以外は厳しく、と経路ごとに分ける。
 const staticLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   limit: 1000,
@@ -87,10 +95,8 @@ const io = new Server(httpServer, {
     origin: allowedOrigins,
     methods: ["GET", "POST"],
   },
-  // Security: cors の origin 設定は不一致でもヘッダを付けないだけで接続を拒否せず、
-  // engine.io 自身も Origin を検証しない。WebSocket 直結（transports: ["websocket"]）
-  // なら第三者サイトからそのまま接続できてしまうため、ハンドシェイク時に明示的に
-  // Origin を照合して拒否する。
+  // Security: cors の origin 設定は不一致でもヘッダを付けないだけで接続を拒否せず、engine.io 自身も Origin を検証しない。
+  // WebSocket 直結（transports: ["websocket"]）なら第三者サイトからそのまま接続できてしまうため、ハンドシェイク時に明示的に Origin を照合して拒否する。
   allowRequest: (req, callback) => {
     const origin = req.headers.origin;
     if (isOriginAllowed(origin, allowedOrigins)) {
@@ -110,12 +116,12 @@ const io = new Server(httpServer, {
 // Security: Simple Socket.io rate limiting
 const socketConnections = new ConnectionCounter(config.maxConnectionsPerClient);
 
-// Security: クライアントの識別に失敗しても効く歯止め。LLM と TTS の同時呼び出しを
-// プロセス全体で抑える。
+// Security: クライアントの識別に失敗しても効く歯止め。
+// LLM と TTS の同時呼び出しをプロセス全体で抑える。
 const generationLimiter = new ConcurrencyLimiter(config.maxConcurrentGenerations);
 
-// Security: user-input は 1 件ごとに LLM ストリームと文単位の TTS を発火させ、
-// そのまま課金につながる。接続単位と IP 単位の両方で上限を設ける。
+// Security: user-input は 1 件ごとに LLM ストリームと文単位の TTS を発火させ、そのまま課金につながる。
+// 接続単位と IP 単位の両方で上限を設ける。
 const socketEventLimiter = new TokenBucketLimiter({
   capacity: 10,
   refillPerSecond: 10 / 60, // 10 requests per minute, burst 10
@@ -136,9 +142,9 @@ const limiterPruneTimer = setInterval(
 limiterPruneTimer.unref();
 
 /**
- * 上限のキーに使うクライアント識別子。IPv6 は /56 単位にまとめる。
- * アドレスそのものを使うと、/64 を持つ相手が送信元を変えるだけで上限を
- * すり抜けられる。
+ * 上限のキーに使うクライアント識別子。
+ * IPv6 は /56 単位にまとめる。
+ * アドレスそのものを使うと、/64 を持つ相手が送信元を変えるだけで上限をすり抜けられる。
  */
 function getClientKey(socket: Socket): string {
   const forwardedFor = socket.handshake.headers["x-forwarded-for"];
@@ -160,10 +166,8 @@ io.use((socket, next) => {
     return next(new Error("Too many connections"));
   }
 
-  // 解放は engine.io の接続が閉じたときに行う。ミドルウェアを通った直後に
-  // 接続が閉じていると socket.io は connection も disconnect も発火させずに
-  // socket を捨てるため、disconnect だけに頼ると数えた分が永久に残り、
-  // 数回繰り返すだけでその IP は接続できなくなる。
+  // 解放は engine.io の接続が閉じたときに行う。
+  // ミドルウェアを通った直後に接続が閉じていると socket.io は connection も disconnect も発火させずに socket を捨てるため、disconnect だけに頼ると数えた分が永久に残り、数回繰り返すだけでその IP は接続できなくなる。
   socket.conn.once("close", release);
   // すでに閉じ終わっていた場合は close を受け取れないので、その場で解放する
   if (socket.conn.readyState !== "open") {
@@ -198,9 +202,8 @@ app.get("/demo", staticLimiter, (req: Request, res: Response) => {
 
 app.get("/health", staticLimiter, async (req: Request, res: Response) => {
   await dataReadyPromise;
-  // Sheets の取得に失敗していれば「準備完了」を名乗らない。空のキャッシュのまま
-  // ready を返すと、プロンプトも知識も無いインスタンスに Cloud Run がトラフィックを
-  // 流してしまう。
+  // Sheets の取得に失敗していれば「準備完了」を名乗らない。
+  // 空のキャッシュのまま ready を返すと、プロンプトも知識も無いインスタンスに Cloud Run がトラフィックを流してしまう。
   if (!isDataReady()) {
     return res.status(503).json({ status: "unavailable" });
   }
@@ -231,20 +234,18 @@ app.get("/api/:sheetName", staticLimiter, async (req: Request, res: Response) =>
   }
 });
 
-// 上で個別に limiter を付けていない経路（今後追加される POST など）には
-// 厳しい方の上限を適用する。
+// 上で個別に limiter を付けていない経路（今後追加される POST など）には厳しい方の上限を適用する。
 app.use(apiLimiter);
 
-// Security: エラー応答にスタックトレースを含めない。Express 既定のエラーハンドラは
-// NODE_ENV=production 以外だと err.stack を返し、絶対パスなどの内部情報が漏れる。
+// Security: エラー応答にスタックトレースを含めない。
+// Express 既定のエラーハンドラは NODE_ENV=production 以外だと err.stack を返し、絶対パスなどの内部情報が漏れる。
 app.use((err: unknown, req: Request, res: Response, next: NextFunction) => {
   const message = err instanceof Error ? err.message : String(err);
   if (res.headersSent) {
     return next(err);
   }
 
-  // 不正な JSON、サイズ超過、不正な URL エンコードなどは呼び出し側の誤りなので、
-  // 500 ではなく本来のステータスで返す（本文は汎用メッセージのみ）。
+  // 不正な JSON、サイズ超過、不正な URL エンコードなどは呼び出し側の誤りなので、500 ではなく本来のステータスで返す（本文は汎用メッセージのみ）。
   const status = getClientErrorStatus(err);
   if (status !== null) {
     return res.status(status).json({ error: "Bad request" });
@@ -301,8 +302,8 @@ io.on("connection", (socket) => {
         return;
       }
 
-      // プロセス全体の同時生成数で頭打ちにする。クライアントの識別が構成に
-      // 依存するのに対し、これは常に効く歯止めになる。
+      // プロセス全体の同時生成数で頭打ちにする。
+      // クライアントの識別が構成に依存するのに対し、これは常に効く歯止めになる。
       const releaseSlot = generationLimiter.tryAcquire();
       if (!releaseSlot) {
         socket.emit("error", {
@@ -311,8 +312,8 @@ io.on("connection", (socket) => {
         return;
       }
 
-      // handleUserInput は async。await も catch もしないと、投げられた例外が
-      // unhandled rejection となり Node 24 の既定設定ではプロセスごと落ちる。
+      // handleUserInput は async。
+      // await も catch もしないと、投げられた例外が unhandled rejection となり Node 24 の既定設定ではプロセスごと落ちる。
       void chatService
         .handleUserInput(socket, data)
         .catch((error: unknown) => {
@@ -332,8 +333,7 @@ io.on("connection", (socket) => {
   });
 });
 
-// Safety net: 拾い損ねた Promise の reject ではプロセスを落とさず、
-// 同期処理の途中で突き抜けた例外では接続を閉じてから終了する（Cloud Run が再起動）。
+// Safety net: 拾い損ねた Promise の reject ではプロセスを落とさず、同期処理の途中で突き抜けた例外では接続を閉じてから終了する（Cloud Run が再起動）。
 // 詳細は server/utils/processHandlers.ts を参照。
 // io.close() は接続中のソケットを切断してから内部の httpServer も閉じる。
 installProcessHandlers(process, { server: io });

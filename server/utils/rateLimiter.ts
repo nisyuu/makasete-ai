@@ -1,11 +1,9 @@
 /**
  * Socket.IO イベント用のトークンバケット。
  *
- * express-rate-limit は Express のミドルウェアチェーンにしか効かない。engine.io は
- * `removeAllListeners("request")` で /socket.io を Express より先に横取りするため、
- * Socket.IO 経由の user-input は HTTP のレート制限を一切通らない。1 イベントごとに
- * LLM ストリーム 1 回と文単位の TTS 呼び出しが走り、そのまま課金されるので、
- * ソケット側に独自の制限を置く。
+ * express-rate-limit は Express のミドルウェアチェーンにしか効かない。
+ * engine.io は `removeAllListeners("request")` で /socket.io を Express より先に横取りするため、Socket.IO 経由の user-input は HTTP のレート制限を一切通らない。
+ * 1 イベントごとに LLM ストリーム 1 回と文単位の TTS 呼び出しが走り、そのまま課金されるので、ソケット側に独自の制限を置く。
  */
 export interface TokenBucketOptions {
   /** バケットの最大トークン数（バースト許容量） */
