@@ -114,7 +114,6 @@ jobs:
             echo "**Automatic Deploy Command**:"
             echo "After merging to \`main\`, deployment happens via Cloud Build trigger."
             echo ""
-            echo "For manual release notes or client notification, see the GAS script in \`/gas/main.js\`."
           } > /tmp/pr_body.md
 
           EXISTING_PR=$(gh pr list \
