@@ -19,6 +19,11 @@ import {
 } from "./utils/origin";
 import { resolveClientIp, toRateLimitKey } from "./utils/clientIp";
 import { ConnectionCounter } from "./utils/connectionCounter";
+import {
+  PUBLIC_ALL_SHEETS,
+  isSheetPublic,
+  parsePublicSheets,
+} from "./utils/publicSheets";
 import { ConcurrencyLimiter } from "./utils/concurrencyLimiter";
 import { createProxyHeaderLogger } from "./utils/proxyDiagnostics";
 import { TokenBucketLimiter } from "./utils/rateLimiter";
@@ -46,6 +51,16 @@ app.set("trust proxy", TRUSTED_PROXY_COUNT);
 const logProxyHeaders = config.logProxyHeaders
   ? createProxyHeaderLogger({ expectedHopCount: TRUSTED_PROXY_COUNT })
   : null;
+
+// Security: API から公開するシートを限定する（既定は settings / items / news）
+const publicSheets = parsePublicSheets(process.env.PUBLIC_SHEETS);
+if (publicSheets === PUBLIC_ALL_SHEETS) {
+  console.info(
+    "[config] PUBLIC_SHEETS=* exposes every sheet except 'prompt' and 'private_*' via /api/:sheetName.",
+  );
+} else {
+  console.info(`[config] Public sheets: ${publicSheets.join(", ") || "(none)"}`);
+}
 
 // Security: Use environment variable for allowed origins
 const allowedOrigins = parseAllowedOrigins(process.env.ALLOWED_ORIGINS);
@@ -221,9 +236,11 @@ app.get("/api/:sheetName", staticLimiter, async (req: Request, res: Response) =>
     return res.status(400).json({ error: "Invalid sheet name" });
   }
 
-  // Security: Do not expose the prompt sheet via API
-  if (sheetName === "prompt") {
-    return res.status(404).json({ error: "Sheet 'prompt' not found" });
+  // Security: 公開してよいシートだけを返す。
+  // 運営者が社内向けのシートを増やしたとき、接頭辞の付け忘れで内容が公開されるのを防ぐ。
+  // 存在の有無を推測されないよう、非公開のシートも存在しないシートと同じ応答にする。
+  if (!isSheetPublic(sheetName, publicSheets)) {
+    return res.status(404).json({ error: `Sheet '${sheetName}' not found` });
   }
 
   const data = getAllSheetData();
