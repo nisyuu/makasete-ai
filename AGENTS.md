@@ -5,7 +5,7 @@ This document defines the shared rules and standards for all AI agents interacti
 ## 核心的な原則 (Core Principles)
 
 1.  **Source of Truth**: AIの挙動（プロンプト、知識、設定）は Google Sheets が唯一の真実です。コード内に直接プロンプトやデータをハードコードせず、必ず `server/services/sheets.ts` を経由して取得・反映される構造を維持してください。
-2.  **Zero-Latency Experience**: ユーザー体験において「低遅延」は最優先事項です。音声合成 (TTS) とテキスト生成は必ず句読点ベースのストリーミング形式で実装してください。
+2.  **Zero-Latency Experience**: ユーザー体験において「低遅延」は最優先事項です。テキスト生成は必ず句読点ベースのストリーミング形式で表示してください。音声合成 (TTS) は文ごとに分けると文の境目で抑揚がそろわず品質が落ちるため、応答全体を1回で生成します。PCM を返すプロバイダでは、生成された断片から順に送って再生までの待ち時間を抑えてください。
 3.  **Shadow DOM Isolation**: ウィジェット (`widget/`) は埋め込み先のサイトと干渉しないよう、必ず Shadow DOM によるカプセル化を徹底してください。
 
 ## 技術スタック (Tech Stack)

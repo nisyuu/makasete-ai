@@ -16,7 +16,7 @@ export interface AudioHandlerOptions {
 
 export interface AudioHandler {
   /**
-   * 音声チャンクを再生する。pcm が無ければ MP3 などの1文分のファイルとしてキューに積み、
+   * 音声チャンクを再生する。pcm が無ければ MP3 などの1応答分のファイルとしてキューに積み、
    * pcm があればヘッダ無しの PCM 断片として前の断片の直後に予約する。
    */
   handleAudioChunk: (content: unknown, pcm?: PcmFormat) => void;
@@ -57,7 +57,7 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
   // いる間にリセットされた場合、古い世代の音声を再生しないために使う。
   let playbackGeneration = 0;
   // resetAudioState の後、同じ応答の残りの音声を鳴らさないためのフラグ。
-  // PCM は1文が数十ミリ秒の断片で届くので、止めても直後の断片で文の続きが鳴ってしまう。
+  // PCM は数十ミリ秒の断片で届くので、止めても直後の断片で続きが鳴ってしまう。
   let isMuted = false;
 
   // PCM の再生予約。断片は数十ミリ秒と短く、onended で次を始めると継ぎ目ごとに隙間が空いて音が途切れる。

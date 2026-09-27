@@ -144,7 +144,7 @@ const socketConnections = new ConnectionCounter(config.maxConnectionsPerClient);
 // LLM と TTS の同時呼び出しをプロセス全体で抑える。
 const generationLimiter = new ConcurrencyLimiter(config.maxConcurrentGenerations);
 
-// Security: user-input は 1 件ごとに LLM ストリームと文単位の TTS を発火させ、そのまま課金につながる。
+// Security: user-input は 1 件ごとに LLM ストリームと TTS を発火させ、そのまま課金につながる。
 // 接続単位と IP 単位の両方で上限を設ける。
 const socketEventLimiter = new TokenBucketLimiter({
   capacity: 10,

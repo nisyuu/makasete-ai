@@ -1,3 +1,4 @@
+import { Readable } from "stream";
 import { Socket } from "socket.io";
 import type { Content } from "@google/generative-ai";
 import { getAllSheetData } from "./sheets";
@@ -142,46 +143,13 @@ export class ChatService {
 
       let fullResponseText = "";
 
-      // Pipeline: audio emissions are chained to preserve sentence order while
-      // TTS generation runs concurrently with LLM streaming.
-      let audioEmitChain: Promise<void> = Promise.resolve();
-
-      const enqueueSentence = (sentence: string): void => {
+      // 表示用のテキストは文ごとに送るが、音声は文に分けず応答全体を1回の TTS で生成する。
+      // 文ごとに別々に生成すると、文の境目で声の高さや抑揚、間の取り方がそろわず音声の品質が落ちるため。
+      const emitSentence = (sentence: string): void => {
         if (isSuperseded()) return;
         const uiText = stripTags(sentence);
-
         if (isVoiceInput) {
           emit("audio-chunk", { type: "text", content: uiText });
-
-          // Start TTS immediately (concurrent with LLM streaming and other sentences)
-          const streamPromise = this.startEagerTTSStream(sentence, ttsService, language);
-
-          // Chain: emit this sentence's audio only after the previous one finishes
-          audioEmitChain = audioEmitChain.then(() => {
-            if (isSuperseded()) {
-              // Superseded by a newer input: discard the buffered audio without
-              // emitting it. Resuming with no data listener drains and drops it.
-              //
-              // 'error' リスナーを必ず先に付ける。
-              // ElevenLabs のストリームは resume 後に下流の fetch が失敗すると 'error' を emit し、リスナーが無い Readable の 'error' は uncaughtException になってプロセスを落とす。
-              return streamPromise
-                .then((s) => {
-                  if (!s) return;
-                  s.on("error", (err: Error) => {
-                    console.error("[TTS] Discarded stream error:", err.message);
-                  });
-                  s.resume();
-                })
-                .catch((err: unknown) => {
-                  const message =
-                    err instanceof Error ? err.message : String(err);
-                  console.error("[TTS] Failed to discard stream:", message);
-                });
-            }
-            return ttsService.pcmSampleRate
-              ? this.forwardPcmStreamToSocket(emit, streamPromise, ttsService.pcmSampleRate)
-              : this.drainStreamToSocket(emit, streamPromise);
-          });
         } else {
           emit("text-chunk", { content: uiText });
         }
@@ -194,19 +162,26 @@ export class ChatService {
 
         const sentences = streamBuffer.add(chunkText);
         for (const sentence of sentences) {
-          enqueueSentence(sentence);
+          emitSentence(sentence);
         }
       }
 
       if (!isSuperseded()) {
         const remaining = streamBuffer.flush();
         if (remaining) {
-          enqueueSentence(remaining);
+          emitSentence(remaining);
         }
       }
 
-      // Wait for all audio to finish before signaling completion
-      await audioEmitChain;
+      // 応答全体がそろってから読み上げを始めるので、最初の音は LLM の生成完了より後になる。
+      if (isVoiceInput && !isSuperseded()) {
+        const streamPromise = this.startTTSStream(fullResponseText, ttsService, language);
+        if (ttsService.pcmSampleRate) {
+          await this.forwardPcmStreamToSocket(emit, streamPromise, ttsService.pcmSampleRate, isSuperseded);
+        } else {
+          await this.drainStreamToSocket(emit, streamPromise, isSuperseded);
+        }
+      }
 
       // A newer input arrived while generating: drop this stale response entirely
       // (no history push, recommendations or completion) to keep the conversation
@@ -255,38 +230,36 @@ export class ChatService {
     if (index !== -1) this.chatHistory.splice(index, 1);
   }
 
-  // Starts TTS generation eagerly (without awaiting the caller) and returns a
-  // paused stream. The stream buffers internally until drainStreamToSocket resumes it.
-  private async startEagerTTSStream(
-    sentence: string,
+  // 失敗しても応答全体は止めず、音声が無いまま完了させる。
+  private async startTTSStream(
+    text: string,
     ttsService: TTSService,
     language: string,
-  ): Promise<NodeJS.ReadableStream | null> {
-    const ttsInput = this.prepareTTSInput(sentence, ttsService.getName());
+  ): Promise<Readable | null> {
+    const ttsInput = this.prepareTTSInput(text, ttsService.getName());
     if (!ttsInput) return null;
 
     try {
-      const audioStream = await ttsService.generateSpeechStream(ttsInput, language);
-      audioStream.pause(); // Buffer internally; drainStreamToSocket will resume
-      return audioStream;
+      return await ttsService.generateSpeechStream(ttsInput, language);
     } catch (e: unknown) {
       console.error("[TTS] Failed to start stream:", e instanceof Error ? e.message : String(e));
       return null;
     }
   }
 
-  // Resumes a paused audio stream, buffers it in full, and forwards the whole
-  // sentence's audio to the socket as a single "audio-chunk".
+  // Buffers the audio stream in full and forwards the whole response's audio
+  // to the socket as a single "audio-chunk".
   //
   // The audio is MP3, which cannot be split at arbitrary byte boundaries: MP3's
   // bit reservoir stores a frame's high-frequency data in preceding frames, so
   // decoding a mid-stream byte slice on its own loses those highs and sounds
   // muffled (plus clicks/gaps at frame-desynced boundaries). The client decodes
   // each "audio-chunk" as a self-contained MP3 via decodeAudioData, so we must
-  // send one complete MP3 per sentence rather than partial slices.
+  // send one complete MP3 rather than partial slices.
   private async drainStreamToSocket(
     emit: EmitFn,
-    streamPromise: Promise<NodeJS.ReadableStream | null>,
+    streamPromise: Promise<Readable | null>,
+    isSuperseded: () => boolean,
   ): Promise<void> {
     const audioStream = await streamPromise;
     if (!audioStream) return;
@@ -294,12 +267,24 @@ export class ChatService {
     await new Promise<void>((resolve) => {
       const chunks: Buffer[] = [];
 
+      // 'error' リスナーは destroy より先に付ける。
+      // リスナーが無い Readable の 'error' は uncaughtException になってプロセスを落とす。
+      audioStream.on("error", (err) => {
+        console.error("[TTS] Stream error:", err);
+        resolve();
+      });
+
       audioStream.on("data", (chunk: Buffer) => {
+        if (isSuperseded()) {
+          audioStream.destroy();
+          resolve();
+          return;
+        }
         chunks.push(chunk);
       });
 
       audioStream.on("end", () => {
-        if (chunks.length > 0) {
+        if (!isSuperseded() && chunks.length > 0) {
           const full = Buffer.concat(chunks);
           if (full.length > 0) {
             emit("audio-chunk", { type: "audio", content: full });
@@ -307,23 +292,17 @@ export class ChatService {
         }
         resolve();
       });
-
-      audioStream.on("error", (err) => {
-        console.error("[TTS] Stream error:", err);
-        resolve(); // Continue to next sentence rather than aborting the chain
-      });
-
-      audioStream.resume();
     });
   }
 
-  // ヘッダ無しの PCM は断片ごとに単独で再生できるので、MP3 のように文全体を待たずに届いた順に送る。
+  // ヘッダ無しの PCM は断片ごとに単独で再生できるので、MP3 のように全体を待たずに届いた順に送る。
   // これで最初の音が出るまでが TTS の生成完了ではなく最初の断片の到着で決まる。
   // 16bit のサンプルが断片の境目で割れると、それ以降の音がすべてノイズになる。奇数バイトは次の断片に持ち越す。
   private async forwardPcmStreamToSocket(
     emit: EmitFn,
-    streamPromise: Promise<NodeJS.ReadableStream | null>,
+    streamPromise: Promise<Readable | null>,
     sampleRate: number,
+    isSuperseded: () => boolean,
   ): Promise<void> {
     const audioStream = await streamPromise;
     if (!audioStream) return;
@@ -331,7 +310,19 @@ export class ChatService {
     await new Promise<void>((resolve) => {
       let carry: Buffer = Buffer.alloc(0);
 
+      // 'error' リスナーは destroy より先に付ける（drainStreamToSocket と同じ理由）。
+      audioStream.on("error", (err) => {
+        console.error("[TTS] Stream error:", err);
+        resolve();
+      });
+
       audioStream.on("data", (chunk: Buffer) => {
+        // 応答全体の音声は長いので、割り込まれたら残りを送らずに打ち切る。
+        if (isSuperseded()) {
+          audioStream.destroy();
+          resolve();
+          return;
+        }
         const data = carry.length > 0 ? Buffer.concat([carry, chunk]) : chunk;
         const evenLength = data.length - (data.length % 2);
         carry = data.subarray(evenLength);
@@ -346,37 +337,30 @@ export class ChatService {
       });
 
       audioStream.on("end", () => resolve());
-
-      audioStream.on("error", (err) => {
-        console.error("[TTS] Stream error:", err);
-        resolve(); // Continue to next sentence rather than aborting the chain
-      });
-
-      audioStream.resume();
     });
   }
 
   // Prepares the TTS input string, applying SSML pause tuning for Google TTS.
-  private prepareTTSInput(sentence: string, ttsProviderName: string): string | null {
+  private prepareTTSInput(input: string, ttsProviderName: string): string | null {
     // Gemini の音声生成モデルは SSML を解釈せず、タグや &amp; などの実体参照まで読み上げてしまう。
     // cleanupForTTS は SSML 向けに & を &amp; にするので、それも戻してプレーンテキストで渡す。
     if (ttsProviderName === "gemini-flash-tts") {
-      const plain = isSsml(sentence) ? decodeXmlEntities(sentence.replace(/<[^>]*>/g, "")) : sentence;
+      const plain = isSsml(input) ? decodeXmlEntities(input.replace(/<[^>]*>/g, "")) : input;
       const text = decodeXmlEntities(cleanupForTTS(plain)).trim();
       return text || null;
     }
 
-    // すでに SSML として組み立てられた文だけを素通しする。
-    // `hasTags` は `<[^>]*>` に一致するだけなので、LLM が出力した「A<B>C」や「<br>」でも真になり、無エスケープのまま <speak> に包まれて TTS の SSML パースエラーを招く（その文だけ音声が無言になる）。
+    // すでに SSML として組み立てられた入力だけを素通しする。
+    // `hasTags` は `<[^>]*>` に一致するだけなので、LLM が出力した「A<B>C」や「<br>」でも真になり、無エスケープのまま <speak> に包まれて TTS の SSML パースエラーを招く（応答の音声が丸ごと無言になる）。
     // 先頭が <speak> の場合に限定し、それ以外は必ずエスケープ経路へ送る。
-    if (isSsml(sentence) && hasTags(sentence)) {
-      const innerText = sentence.replace(/<\/?speak>/g, "").trim();
+    if (isSsml(input) && hasTags(input)) {
+      const innerText = input.replace(/<\/?speak>/g, "").trim();
       const ssmlContent = removeMarkdownLinks(innerText);
       if (!ssmlContent.trim() || !ssmlContent.replace(/<[^>]*>/g, "").trim()) return null;
       return `<speak>${ssmlContent}</speak>`;
     }
 
-    const cleanedText = cleanupForTTS(sentence);
+    const cleanedText = cleanupForTTS(input);
     if (!cleanedText.trim()) return null;
 
     // Google TTS supports SSML: insert break tags for natural Japanese prosody

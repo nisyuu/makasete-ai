@@ -238,7 +238,7 @@ describe('ChatService', () => {
         });
 
         it('should skip TTS when the tagged input has no spoken content', async () => {
-            // 句読点を含まないので flush 経由で processSentence に渡る
+            // 読み上げる中身が無いタグだけの応答
             generateResponseStream.mockResolvedValue(makeStream(['<speak></speak>']));
             const socket = makeSocket();
             const svc = new ChatService();
@@ -264,21 +264,50 @@ describe('ChatService', () => {
             errSpy.mockRestore();
         });
 
-        it('should start TTS concurrently for multiple sentences', async () => {
+        it('should synthesize the whole response in a single TTS call', async () => {
+            // 文ごとに分けて生成すると文の境目で抑揚がそろわず、音声の品質が落ちる
             generateResponseStream.mockResolvedValue(makeStream(['こんにちは。', '元気ですか？']));
-            // beforeEach provides mockImplementation that creates a fresh stream per call
             const socket = makeSocket();
             const svc = new ChatService();
 
             await svc.handleUserInput(socket as never, { text: 'hi', isVoiceInput: true });
 
-            // TTS called once per sentence
-            expect(generateSpeechStream).toHaveBeenCalledTimes(2);
-            // Audio emitted in order for both sentences
+            expect(generateSpeechStream).toHaveBeenCalledTimes(1);
+            expect(generateSpeechStream.mock.calls[0][0]).toBe('こんにちは。元気ですか？');
             const audioEmits = socket.emit.mock.calls.filter(
                 (c) => c[0] === 'audio-chunk' && c[1].type === 'audio',
             );
-            expect(audioEmits).toHaveLength(2);
+            expect(audioEmits).toHaveLength(1);
+        });
+
+        it('should still emit the display text sentence by sentence', async () => {
+            generateResponseStream.mockResolvedValue(makeStream(['こんにちは。', '元気ですか？']));
+            const socket = makeSocket();
+            const svc = new ChatService();
+
+            await svc.handleUserInput(socket as never, { text: 'hi', isVoiceInput: true });
+
+            const textEmits = socket.emit.mock.calls.filter(
+                (c) => c[0] === 'audio-chunk' && c[1].type === 'text',
+            );
+            expect(textEmits.map((c) => c[1].content)).toEqual(['こんにちは。', '元気ですか？']);
+        });
+
+        it('should complete without audio when TTS fails to start', async () => {
+            generateResponseStream.mockResolvedValue(makeStream(['やあ。']));
+            generateSpeechStream.mockRejectedValue(new Error('tts down'));
+            const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+            const socket = makeSocket();
+            const svc = new ChatService();
+
+            await svc.handleUserInput(socket as never, { text: 'hi', isVoiceInput: true });
+
+            const audioEmits = socket.emit.mock.calls.filter(
+                (c) => c[0] === 'audio-chunk' && c[1].type === 'audio',
+            );
+            expect(audioEmits).toHaveLength(0);
+            expect(socket.emit).toHaveBeenCalledWith('response-complete');
+            errSpy.mockRestore();
         });
 
         it('should emit a multi-chunk TTS stream as a single concatenated audio chunk', async () => {
@@ -297,13 +326,13 @@ describe('ChatService', () => {
             const audioEmits = socket.emit.mock.calls.filter(
                 (c) => c[0] === 'audio-chunk' && c[1].type === 'audio',
             );
-            // 断片ごとではなく1文=1チャンクで送信される
+            // 断片ごとではなく応答全体で1チャンクとして送信される
             expect(audioEmits).toHaveLength(1);
             expect((audioEmits[0][1].content as Buffer).toString()).toBe('AUDIO');
         });
 
         it('should forward PCM TTS parts one by one with their format', async () => {
-            // ヘッダ無しの PCM は断片ごとに再生できるので、文全体を待たずに届いた順に送る
+            // ヘッダ無しの PCM は断片ごとに再生できるので、全体を待たずに届いた順に送る
             getTTSService.mockReturnValueOnce({ generateSpeechStream, getName: () => 'gemini-flash-tts', pcmSampleRate: 24000 });
             generateResponseStream.mockResolvedValue(makeStream(['やあ。']));
             generateSpeechStream.mockResolvedValue(
@@ -340,23 +369,6 @@ describe('ChatService', () => {
             );
             // 最後の1バイトはサンプルとして完結しないので捨てる
             expect(audioEmits.map((c) => [...(c[1].content as Buffer)])).toEqual([[1, 2], [3, 4, 5, 6]]);
-        });
-
-        it('should keep sentence order when forwarding PCM', async () => {
-            getTTSService.mockReturnValueOnce({ generateSpeechStream, getName: () => 'gemini-flash-tts', pcmSampleRate: 24000 });
-            generateResponseStream.mockResolvedValue(makeStream(['一つ目。', '二つ目。']));
-            generateSpeechStream
-                .mockResolvedValueOnce(Readable.from([Buffer.from([1, 1]), Buffer.from([1, 2])]))
-                .mockResolvedValueOnce(Readable.from([Buffer.from([2, 1])]));
-            const socket = makeSocket();
-            const svc = new ChatService();
-
-            await svc.handleUserInput(socket as never, { text: 'hi', isVoiceInput: true });
-
-            const audioEmits = socket.emit.mock.calls.filter(
-                (c) => c[0] === 'audio-chunk' && c[1].type === 'audio',
-            );
-            expect(audioEmits.map((c) => [...(c[1].content as Buffer)])).toEqual([[1, 1], [1, 2], [2, 1]]);
         });
 
         it('should strip SSML tags for Gemini Flash TTS', async () => {
@@ -693,6 +705,45 @@ describe('ChatService', () => {
             expect(completes).toHaveLength(1);
             // 新しい応答は送信される
             expect(socket.emit).toHaveBeenCalledWith('audio-chunk', { type: 'text', content: '新しい音声。' });
+        });
+
+        it('stops forwarding audio once a newer input supersedes the response', async () => {
+            // 応答全体の音声は長いので、割り込まれたら残りを送らずに打ち切る
+            const pcmService = { generateSpeechStream, getName: () => 'gemini-flash-tts', pcmSampleRate: 24000 };
+            getTTSService.mockReturnValueOnce(pcmService).mockReturnValueOnce(pcmService);
+            let releaseAudio!: () => void;
+            const audioGate = new Promise<void>((r) => {
+                releaseAudio = r;
+            });
+            generateSpeechStream.mockResolvedValueOnce(
+                Readable.from(
+                    (async function* () {
+                        yield Buffer.from([1, 1]);
+                        await audioGate;
+                        yield Buffer.from([9, 9]);
+                    })(),
+                ),
+            );
+            generateResponseStream.mockReset();
+            generateResponseStream
+                .mockResolvedValueOnce(makeStream(['古い応答。']))
+                .mockResolvedValueOnce(makeStream(['新しい応答。']));
+            const socket = makeSocket();
+            const svc = new ChatService();
+            const audioBytes = () =>
+                socket.emit.mock.calls
+                    .filter((c) => c[0] === 'audio-chunk' && c[1].type === 'audio')
+                    .map((c) => [...(c[1].content as Buffer)]);
+
+            const p1 = svc.handleUserInput(socket as never, { text: 'first', isVoiceInput: true });
+            await vi.waitFor(() => expect(audioBytes()).toEqual([[1, 1]]));
+            const p2 = svc.handleUserInput(socket as never, { text: 'second', isVoiceInput: true });
+            releaseAudio();
+            await Promise.all([p1, p2]);
+
+            expect(audioBytes()).not.toContainEqual([9, 9]);
+            const completes = socket.emit.mock.calls.filter((c) => c[0] === 'response-complete');
+            expect(completes).toHaveLength(1);
         });
 
         it('does not emit an error for a response that was already superseded', async () => {
