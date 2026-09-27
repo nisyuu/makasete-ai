@@ -10,6 +10,21 @@ export function normalizeSettingKey(key: string): string {
   return key.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
+const HTML_ESCAPES: Record<string, string> = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "'": "&#39;",
+};
+
+/**
+ * HTML のテキストや属性値に埋め込めるようにエスケープする。
+ */
+export function escapeHtml(str: string): string {
+  return str.replace(/[&<>"']/g, (m) => HTML_ESCAPES[m] || m);
+}
+
 /**
  * URL に含まれてはいけない文字（バックスラッシュと制御文字）が無いかを調べる。
  *
@@ -29,31 +44,17 @@ function hasUnsafeUrlChars(url: string): boolean {
  * Formats raw text into safe HTML, escaping potential XSS and converting markdown links.
  */
 export function formatMessageText(rawText: string): string {
-  // 1. Escape HTML to prevent basic XSS
-  const escapeHtml = (str: string) => {
-    return str.replace(
-      /[&<>"']/g,
-      (m) =>
-        ({
-          "&": "&amp;",
-          "<": "&lt;",
-          ">": "&gt;",
-          '"': "&quot;",
-          "'": "&#39;",
-        })[m] || m,
-    );
-  };
-
-  // 2. Safe URL check for Markdown links
+  // Safe URL check for Markdown links
   // Only allow http, https, and same-origin relative paths. Block javascript:, etc.
-  const sanitizeUrl = (url: string) => {
+  // 許可しない URL は null を返す。
+  const sanitizeUrl = (url: string): string | null => {
     const trimmed = url.trim();
 
     // ブラウザの URL 解釈に合わせて、先に危険な文字を落とす。
     // バックスラッシュはスラッシュとして扱われ、タブや改行は取り除かれるため、"/\evil.example" や "/<TAB>/evil.example" は「相対パス」のふりをして外部サイトへ飛ぶ。
     // 制御文字ごと拒否する。
     if (hasUnsafeUrlChars(trimmed)) {
-      return "#";
+      return null;
     }
 
     // スラッシュ 1 個で始まるものだけを同一サイトの相対パスとして許可する。
@@ -66,7 +67,7 @@ export function formatMessageText(rawText: string): string {
       return trimmed;
     }
 
-    return "#";
+    return null;
   };
 
   // First, escape the entire text
@@ -77,6 +78,11 @@ export function formatMessageText(rawText: string): string {
     /\[((?:[^[\]]|\[[^\]]*\])+)\]\(([^)]+)\)/g,
     (_match, linkText, url) => {
       const safeUrl = sanitizeUrl(url);
+      // 許可しない URL を href="#" + target="_blank" にすると、クリックで
+      // ホストページ自身が新しいタブで開いてしまう。リンクにせず文字だけ残す。
+      if (safeUrl === null) {
+        return `<span>${linkText}</span>`;
+      }
       return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${linkText}</a>`;
     },
   );

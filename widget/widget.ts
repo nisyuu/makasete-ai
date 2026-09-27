@@ -15,6 +15,7 @@ import {
 } from "./utils/uiRenderer";
 import { parseSettings } from "./utils/settings";
 import { resolveServerUrl } from "./utils/serverUrl";
+import { escapeHtml } from "./utils/text";
 
 interface WidgetConfig {
   serverUrl?: string;
@@ -27,26 +28,6 @@ interface WidgetConfig {
 const ICON_AUDIO_ON = `<svg class="lucide lucide-volume-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>`;
 /** 音声読み上げ OFF（ミュート）アイコン */
 const ICON_AUDIO_OFF = `<svg class="lucide lucide-volume-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="22" x2="16" y1="9" y2="15"/><line x1="16" x2="22" y1="9" y2="15"/></svg>`;
-
-/**
- * 属性値として安全な形にエスケープする。
- *
- * placeholder や helperText は今のところコード内の既定値だが、将来 settings シートから流し込む改修が入ると、テンプレートリテラル経由でそのまま innerHTML に渡るため属性を抜け出して XSS になる。
- * 入口で常にエスケープしておく。
- */
-function escapeAttribute(value: string): string {
-  return value.replace(
-    /[&<>"']/g,
-    (char) =>
-      ({
-        "&": "&amp;",
-        "<": "&lt;",
-        ">": "&gt;",
-        '"': "&quot;",
-        "'": "&#39;",
-      })[char] || char,
-  );
-}
 
 /**
  * Shadow Root にウィジェットの CSS を適用する。
@@ -71,10 +52,50 @@ function applyWidgetStyles(shadow: ShadowRoot): void {
   shadow.appendChild(style);
 }
 
-/** ウィジェットのリッチUIマークアップ（ランチャーボタン・チャットウィンドウ等） */
-function buildWidgetMarkup(placeholder: string, helperText: string): string {
-  const safePlaceholder = escapeAttribute(placeholder);
-  const safeHelperText = escapeAttribute(helperText);
+/** マークアップに埋め込む、言語で切り替わる文言 */
+interface MarkupLabels {
+  placeholder: string;
+  helperText: string;
+  close: string;
+  voiceInput: string;
+  send: string;
+  loading: string;
+  launcher: string;
+}
+
+function getMarkupLabels(isEn: boolean, placeholder: string | undefined): MarkupLabels {
+  return isEn
+    ? {
+        placeholder: placeholder ?? "Type your question...",
+        helperText: "Cmd(Ctrl) + Enter to send",
+        close: "Close",
+        voiceInput: "Voice input",
+        send: "Send",
+        loading: "Getting ready. Please wait a moment...",
+        launcher: "Ask the AI assistant",
+      }
+    : {
+        placeholder: placeholder ?? "質問を入力...",
+        helperText: "Command(Ctrl) + Enterで送信",
+        close: "閉じる",
+        voiceInput: "音声入力",
+        send: "送信",
+        loading: "準備中です。少々お待ちください...",
+        launcher: "AIアシスタントに相談する",
+      };
+}
+
+/**
+ * ウィジェットのリッチUIマークアップ（ランチャーボタン・チャットウィンドウ等）
+ *
+ * 文言は今のところコード内の既定値だが、将来 settings シートから流し込む改修が入ると、
+ * テンプレートリテラル経由でそのまま innerHTML に渡るため属性を抜け出して XSS になる。
+ * 入口で常にエスケープしておく。
+ */
+function buildWidgetMarkup(rawLabels: MarkupLabels): string {
+  const labels = Object.fromEntries(
+    Object.entries(rawLabels).map(([key, value]) => [key, escapeHtml(value)]),
+  ) as unknown as MarkupLabels;
   return `
     <div class="widget-container">
       <div class="chat-window">
@@ -84,7 +105,7 @@ function buildWidgetMarkup(placeholder: string, helperText: string): string {
             <button class="audio-toggle-btn" aria-pressed="false">
               ${ICON_AUDIO_OFF}
             </button>
-            <button class="close-btn" title="閉じる">
+            <button class="close-btn" title="${labels.close}" aria-label="${labels.close}">
               <svg class="lucide lucide-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
             </button>
           </div>
@@ -92,14 +113,14 @@ function buildWidgetMarkup(placeholder: string, helperText: string): string {
         <div class="chat-timeline"></div>
         <div class="input-area">
           <div class="input-wrapper">
-            <textarea class="text-input" placeholder="${safePlaceholder}" rows="1"></textarea>
-            <div class="input-helper">${safeHelperText}</div>
+            <textarea class="text-input" placeholder="${labels.placeholder}" rows="1"></textarea>
+            <div class="input-helper">${labels.helperText}</div>
           </div>
           <div class="input-actions">
-            <button class="btn mic-btn" title="音声入力">
+            <button class="btn mic-btn" title="${labels.voiceInput}" aria-label="${labels.voiceInput}">
               <svg class="lucide lucide-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
             </button>
-            <button class="btn send-btn" title="送信">
+            <button class="btn send-btn" title="${labels.send}" aria-label="${labels.send}">
               <svg class="lucide lucide-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
             </button>
           </div>
@@ -107,10 +128,10 @@ function buildWidgetMarkup(placeholder: string, helperText: string): string {
         <div class="widget-footer">Powered by Makasete AI</div>
         <div class="loading-overlay">
           <div class="spinner"></div>
-          <div class="loading-text">準備中です。少々お待ちください...</div>
+          <div class="loading-text">${labels.loading}</div>
         </div>
       </div>
-      <button class="launcher-button" title="AIアシスタントに相談する">
+      <button class="launcher-button" title="${labels.launcher}" aria-label="${labels.launcher}">
         <svg class="launcher-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
           <path d="M12 8V4H8"></path>
           <rect width="16" height="12" x="4" y="8" rx="2"></rect>
@@ -126,34 +147,42 @@ function buildWidgetMarkup(placeholder: string, helperText: string): string {
 /** ウィジェットのホスト要素の id。二重埋め込みの検知に使う */
 const HOST_ELEMENT_ID = "makasete-ai-widget-host";
 
-export function initChatWidget(config: WidgetConfig = {}): void {
+/**
+ * ウィジェットを埋め込む。
+ *
+ * @returns ウィジェットを取り外す関数。ソケット・音声・イベントリスナーを解放し、ホスト要素を取り除く。
+ *   SPA でページを切り替えるときなどに呼ぶ。
+ */
+export function initChatWidget(config: WidgetConfig = {}): () => void {
   // 同じスクリプトが 2 回読み込まれると、ホスト要素が重複してソケットも 2 本張られる。
   // サーバー側には接続数の上限があるため、2 本目以降は無駄に枠を消費する。
   if (document.getElementById(HOST_ELEMENT_ID)) {
     console.warn("[MakaseteAI] Widget is already mounted; skipping.");
-    return;
+    return () => {};
   }
 
   // タグマネージャ等で <head> に同期挿入されると document.body がまだ無い。
   // そのまま appendChild すると TypeError でウィジェット全体が起動しない。
   if (!document.body) {
-    document.addEventListener(
-      "DOMContentLoaded",
-      () => initChatWidget(config),
-      { once: true },
-    );
-    return;
+    let destroyMounted: (() => void) | null = null;
+    const onReady = (): void => {
+      destroyMounted = initChatWidget(config);
+    };
+    document.addEventListener("DOMContentLoaded", onReady, { once: true });
+    return () => {
+      document.removeEventListener("DOMContentLoaded", onReady);
+      destroyMounted?.();
+      destroyMounted = null;
+    };
   }
 
   const {
     serverUrl = resolveServerUrl(),
-    title = "AIアシスタント",
-    placeholder = "質問を入力...",
     language = "ja",
   } = config;
 
   const isEn = language === "en";
-  const helperText = isEn ? "Cmd(Ctrl) + Enter to send" : "Command(Ctrl) + Enterで送信";
+  const title = config.title ?? (isEn ? "AI Assistant" : "AIアシスタント");
   const greeting = isEn
     ? "Hi, I'm your AI assistant. How can I help you?"
     : "AIアシスタントです。何かお手伝いできることはありますか？";
@@ -170,7 +199,7 @@ export function initChatWidget(config: WidgetConfig = {}): void {
   applyWidgetStyles(shadow);
 
   const wrapper = document.createElement("div");
-  wrapper.innerHTML = buildWidgetMarkup(placeholder, helperText);
+  wrapper.innerHTML = buildWidgetMarkup(getMarkupLabels(isEn, config.placeholder));
   // innerHTML を直接 shadow に展開する（widget-container を維持）
   while (wrapper.firstChild) {
     shadow.appendChild(wrapper.firstChild);
@@ -301,9 +330,6 @@ export function initChatWidget(config: WidgetConfig = {}): void {
     },
     onRecommendation: (products) => {
       appendRecommendations(els.timeline, products);
-    },
-    onConnect: () => {
-      console.log("[MakaseteAI] Connected");
     },
     onConnectionLost: (reason) => {
       audio.resetAudioState();
@@ -457,9 +483,14 @@ export function initChatWidget(config: WidgetConfig = {}): void {
 
   // --- Drag ---
   const header = shadow.querySelector(".chat-header") as HTMLElement;
-  initDragHandler(els.container, [els.launcherBtn, header], els.launcherBtn, (dragging) => {
-    isDragging = dragging;
-  });
+  const cleanupDrag = initDragHandler(
+    els.container,
+    [els.launcherBtn, header],
+    els.launcherBtn,
+    (dragging) => {
+      isDragging = dragging;
+    },
+  );
 
   // --- データ準備の完了を待ち、settings シートの設定を反映してローディングを解除 ---
   // Google Sheets の settings シート（primary_color / initial_message / chat_title）を
@@ -492,4 +523,15 @@ export function initChatWidget(config: WidgetConfig = {}): void {
   }
 
   void initializeWidget();
+
+  let destroyed = false;
+  return function destroy(): void {
+    if (destroyed) return;
+    destroyed = true;
+    socket.disconnect();
+    audio.cleanup();
+    cleanupDrag();
+    unlockBodyScroll();
+    host.remove();
+  };
 }

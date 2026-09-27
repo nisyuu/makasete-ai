@@ -1,4 +1,5 @@
 import { Socket } from "socket.io";
+import type { Content } from "@google/generative-ai";
 import { getAllSheetData } from "./sheets";
 import { generateResponseStream } from "./gemini";
 import { getTTSService } from "./tts/factory";
@@ -34,8 +35,7 @@ export function resolveRequestId(value: unknown): string | number | undefined {
 }
 
 export class ChatService {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private chatHistory: any[] = [];
+  private chatHistory: Content[] = [];
   // Monotonically increasing id of the latest input. A newer input supersedes
   // (cancels) any response still being generated on the same socket, so a user
   // interrupting the bot (barge-in) does not produce overlapping responses.
@@ -44,8 +44,7 @@ export class ChatService {
   // 切断のときに abort し、不要になった生成の課金を止める。
   private activeAbort: AbortController | null = null;
   // 応答がまだ返っていない user ターン。割り込まれた場合は履歴から外す。
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private pendingUserTurn: any = null;
+  private pendingUserTurn: Content | null = null;
 
   /** 接続が切れたときに呼ぶ。生成中のリクエストを打ち切り、以後の送出を止める。 */
   dispose(): void {
@@ -114,7 +113,7 @@ export class ChatService {
     // 入力トークンの課金が倍になる。
     const priorHistory = [...this.chatHistory];
 
-    const userTurn = { role: "user", parts: [{ text }] };
+    const userTurn: Content = { role: "user", parts: [{ text }] };
     this.chatHistory.push(userTurn);
     this.pendingUserTurn = userTurn;
     if (this.chatHistory.length > 20) {
@@ -242,8 +241,7 @@ export class ChatService {
     }
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private removeFromHistory(turn: any): void {
+  private removeFromHistory(turn: Content): void {
     const index = this.chatHistory.indexOf(turn);
     if (index !== -1) this.chatHistory.splice(index, 1);
   }

@@ -144,6 +144,8 @@ ECサイトの `</body>` タグの直前に以下のスクリプトを追加し�
 ></script>
 ```
 
+SPA などでウィジェットが不要になったときは `window.MakaseteAIWidget.destroy()` を呼ぶと、接続・音声・イベントリスナーを解放してウィジェットを取り外せます。
+
 > **注意**: 埋め込み先サイトからの接続はクロスオリジンになります。埋め込み先を限定する運用では、サーバー側の環境変数 `ALLOWED_ORIGINS` に埋め込み先サイトの origin（例: `https://example.com`）を列挙してください。HTTP の CORS と Socket.IO のハンドシェイクの両方で検証されます。
 >
 > 埋め込み先を限定しない運用では `ALLOWED_ORIGINS=*` を指定します。この場合 Origin の照合は行われないため、**費用の歯止めは IP 単位のレート制限（`MAX_CONNECTIONS_PER_CLIENT`、送信回数の上限）と同時生成数の上限（`MAX_CONCURRENT_GENERATIONS`）だけ** になります。次の点に注意してください。
