@@ -13,7 +13,7 @@ type SpeechGenerationConfig = GenerationConfig & {
  * Gemini API の音声生成モデル（Gemini 3.8 Flash Lite TTS）で読み上げる。
  *
  * ストリーミングで返る音声は 24kHz・16bit・モノラルのヘッダ無し PCM で、断片ごとに単独で再生できる。
- * MP3 のように文全体を待たずに、届いた断片から順にウィジェットへ流せるので、最初の音が出るまでが Chirp 3: HD の約半分になる。
+ * MP3 のように全体を待たずに、届いた断片から順にウィジェットへ流せるので、最初の音が出るまでが Chirp 3: HD の約半分になる。
  * 言語は入力文から自動で判別されるため、language での声の切り替えはしない。
  */
 export class GeminiFlashTTSService implements TTSService {
