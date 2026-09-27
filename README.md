@@ -151,7 +151,7 @@ SPA などでウィジェットが不要になったときは `window.MakaseteAI
 > 埋め込み先を限定しない運用では `ALLOWED_ORIGINS=*` を指定します。この場合 Origin の照合は行われないため、**費用の歯止めは IP 単位のレート制限（`MAX_CONNECTIONS_PER_CLIENT`、送信回数の上限）と同時生成数の上限（`MAX_CONCURRENT_GENERATIONS`）だけ** になります。次の点に注意してください。
 >
 > - Origin ヘッダはブラウザ以外のクライアントなら偽装できるため、origin を列挙する運用でも「ブラウザから第三者サイト経由での利用」を防ぐ手段にとどまります。
-> - 埋め込み先ごとに利用を制御・計測したい場合は、サイトごとに期限付きのトークンを発行して検証する仕組みが必要です。現時点では未実装です。
+> - テナントごとの許可サイトは、platform から `ALLOWED_ORIGINS_B64` で渡します（下記「テナントごとの設定」）。
 > - Gemini と TTS の予算アラートを設定しておくことを勧めます。
 
 ## スプレッドシートの構成
@@ -211,7 +211,27 @@ SPA などでウィジェットが不要になったときは `window.MakaseteAI
 
 列挙方式にしているのは、運営者が社内向けのシートを追加したときに、`private_` の付け忘れだけで内容が公開されるのを防ぐためです。
 
-> **注意**: テナントごとの Cloud Run サービスは別リポジトリ（`makasete-ai-platform`）の Cloud Build トリガーからデプロイされ、その際に `--set-env-vars` で環境変数が置き換わります。そのためテナント単位で `PUBLIC_SHEETS` を指定するには、platform 側のトリガー定義に substitution を追加する必要があります。現状はどのテナントも既定値（`settings,items,news`）で動作します。
+### テナントごとの設定（platform から渡す値）
+
+テナントごとの Cloud Run サービスは、別リポジトリ（`makasete-ai-platform`）の Cloud Build トリガーからデプロイされます。トリガーはシェルのコマンドに値を埋め込み、`--set-env-vars` はカンマで変数を区切ります。そのため platform からは、JSON の文字列配列を base64url で包んだ値を、次の環境変数で渡します。日本語のシート名もそのまま運べます。
+
+| 環境変数 | 中身 | 優先 |
+| :--- | :--- | :--- |
+| `PUBLIC_SHEETS_B64` | 公開するシート名の配列（例: `["settings","よくある質問"]`） | `PUBLIC_SHEETS` より優先 |
+| `ALLOWED_ORIGINS_B64` | 埋め込みを許可するサイトの origin の配列（例: `["https://shop.example"]`） | `ALLOWED_ORIGINS` より優先 |
+
+- どちらも、空文字（未設定）なら従来の `PUBLIC_SHEETS` / `ALLOWED_ORIGINS` を使います。
+- `*` は受け付けません。全公開や全許可は、運営者が `PUBLIC_SHEETS=*` / `ALLOWED_ORIGINS=*` で明示したときだけです。
+- `ALLOWED_ORIGINS_B64` が空の配列なら、許可サイトが未登録として全サイトを許可します。
+- 値が壊れている場合、公開シートは既定値に戻り、許可サイトはどのサイトも許可しません（設定ミスで公開範囲を広げないため）。
+
+値は次のように作れます。
+
+```bash
+node -e 'console.log(Buffer.from(JSON.stringify(["https://shop.example"])).toString("base64url"))'
+```
+
+許可サイトを指定しても、サーバー自身のページ（`/demo` など）からの接続は常に許可されます。WebSocket のハンドシェイクは同じサイトからでも Origin を送るため、Origin の host がリクエストの Host と一致するものを自分自身とみなします。
 
 ## デプロイ (Google Cloud Run)
 

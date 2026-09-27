@@ -5,6 +5,8 @@
  * Socket.IO の WebSocket 直結（`transports: ["websocket"]`）は engine.io が Origin を検証しないため、`allowRequest` でこの関数を使ってハンドシェイク自体を拒否する。
  */
 
+import { decodeEncodedList } from "./encodedList";
+
 /** `*`（全 origin 許可）を表す番兵 */
 export const ALLOW_ALL_ORIGINS = "*";
 
@@ -42,6 +44,63 @@ export function parseAllowedOrigins(
 
   // すべて不正だった場合は全許可には戻さない（設定ミスで公開状態にしない）
   return origins;
+}
+
+/**
+ * 環境変数から許可する origin を決める。
+ *
+ * platform がテナントごとに渡す `ALLOWED_ORIGINS_B64`（base64url の JSON 配列）を優先する。
+ * 空の配列は「未登録」なので、`ALLOWED_ORIGINS` 未設定と同じく全許可にする。
+ * 値が壊れていたら全許可には戻さず、どの origin も許可しない（設定ミスで公開状態にしない）。
+ * `*` はこちらでは受け付けない。
+ */
+export function resolveAllowedOrigins(env: {
+  ALLOWED_ORIGINS?: string;
+  ALLOWED_ORIGINS_B64?: string;
+}): string[] | typeof ALLOW_ALL_ORIGINS {
+  const encoded = env.ALLOWED_ORIGINS_B64;
+  if (!encoded) return parseAllowedOrigins(env.ALLOWED_ORIGINS);
+
+  const entries = decodeEncodedList(encoded);
+  if (entries === null) {
+    console.error(
+      "[config] ALLOWED_ORIGINS_B64 is malformed; rejecting every cross-site origin.",
+    );
+    return [];
+  }
+  if (entries.length === 0) return ALLOW_ALL_ORIGINS;
+
+  const origins: string[] = [];
+  for (const entry of entries) {
+    const normalized = entry === ALLOW_ALL_ORIGINS ? null : normalizeOrigin(entry);
+    if (normalized === null) {
+      console.warn(`[config] Ignoring invalid ALLOWED_ORIGINS_B64 entry: ${entry}`);
+      continue;
+    }
+    if (!origins.includes(normalized)) origins.push(normalized);
+  }
+  return origins;
+}
+
+/**
+ * サーバー自身のページ（`/demo` など）からの接続か。
+ *
+ * WebSocket のハンドシェイクは同じサイトからでも Origin を送る。許可リストを設定した
+ * とたんに自分のデモページが繋がらなくなるのを防ぐため、Origin の host が
+ * リクエストの Host と一致すれば許可する。第三者サイトに埋め込まれたブラウザは、
+ * 埋め込み先の Origin を送るので一致しない。
+ */
+export function isOwnOrigin(
+  origin: string | undefined,
+  hostHeader: string | undefined,
+): boolean {
+  if (!origin || !hostHeader) return false;
+  const normalized = normalizeOrigin(origin);
+  if (normalized === null) return false;
+  const { protocol, host } = new URL(normalized);
+  // Host ヘッダも同じ規則で揃える（大文字や既定ポート付きの表記を吸収する）
+  const ownOrigin = normalizeOrigin(`${protocol}//${hostHeader.trim()}`);
+  return ownOrigin !== null && new URL(ownOrigin).host === host;
 }
 
 /** "https://Example.com/" のような表記を "https://example.com" に揃える。 */
