@@ -28,7 +28,7 @@ ECサイトやサービスサイトに簡単導入でき、音声とテキスト
 
 - **技術スタック**: Node.js (v24), Express, Socket.io
 - **AI処理**:
-  - **LLM**: Google Gemini API (gemini-3.5-flash)
+  - **LLM**: Google Gemini API (gemini-3.8-flash)
   - **TTS**: Google Cloud Text-to-Speech (デフォルト, Chirp 3: HD ボイス) または ElevenLabs API
 - **データ連携**: Google Sheets API (商品情報・FAQ・サービス紹介・システムプロンプトの取得)
 
