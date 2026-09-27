@@ -1,5 +1,68 @@
 import { describe, it, expect, vi } from 'vitest';
-import { ALLOW_ALL_ORIGINS, isOriginAllowed, parseAllowedOrigins } from './origin';
+import {
+    ALLOW_ALL_ORIGINS,
+    isOriginAllowed,
+    isOwnOrigin,
+    parseAllowedOrigins,
+    resolveAllowedOrigins,
+} from './origin';
+import { encodeList } from './encodedList';
+
+describe('resolveAllowedOrigins', () => {
+    it('should use ALLOWED_ORIGINS when the encoded value is absent', () => {
+        expect(resolveAllowedOrigins({ ALLOWED_ORIGINS: 'https://a.example' })).toEqual(['https://a.example']);
+        expect(resolveAllowedOrigins({})).toBe(ALLOW_ALL_ORIGINS);
+        expect(resolveAllowedOrigins({ ALLOWED_ORIGINS_B64: '' })).toBe(ALLOW_ALL_ORIGINS);
+    });
+
+    it('should prefer ALLOWED_ORIGINS_B64 and normalize its entries', () => {
+        expect(
+            resolveAllowedOrigins({
+                ALLOWED_ORIGINS: '*',
+                ALLOWED_ORIGINS_B64: encodeList(['https://Shop.Example/', 'https://b.example']),
+            }),
+        ).toEqual(['https://shop.example', 'https://b.example']);
+    });
+
+    it('should treat an encoded empty list as unregistered (allow all)', () => {
+        expect(resolveAllowedOrigins({ ALLOWED_ORIGINS_B64: encodeList([]) })).toBe(ALLOW_ALL_ORIGINS);
+    });
+
+    it('should drop the wildcard and invalid entries from the encoded list', () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        expect(
+            resolveAllowedOrigins({ ALLOWED_ORIGINS_B64: encodeList(['*', 'not a url', 'https://ok.example']) }),
+        ).toEqual(['https://ok.example']);
+        warnSpy.mockRestore();
+    });
+
+    it('should reject every origin when the encoded value is malformed', () => {
+        // 壊れた設定で全許可に戻ると、気付かないまま公開状態になる
+        const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        expect(resolveAllowedOrigins({ ALLOWED_ORIGINS_B64: 'bad;value' })).toEqual([]);
+        expect(errSpy).toHaveBeenCalled();
+        errSpy.mockRestore();
+    });
+});
+
+describe('isOwnOrigin', () => {
+    it('should match when the Origin host equals the Host header', () => {
+        expect(isOwnOrigin('https://svc.a.run.app', 'svc.a.run.app')).toBe(true);
+        expect(isOwnOrigin('https://SVC.a.run.app', 'svc.a.run.app:443')).toBe(true);
+        expect(isOwnOrigin('http://localhost:8080', 'localhost:8080')).toBe(true);
+    });
+
+    it('should not match a different site or port', () => {
+        expect(isOwnOrigin('https://evil.example', 'svc.a.run.app')).toBe(false);
+        expect(isOwnOrigin('http://localhost:3000', 'localhost:8080')).toBe(false);
+    });
+
+    it('should not match when either header is missing or unparsable', () => {
+        expect(isOwnOrigin(undefined, 'svc.a.run.app')).toBe(false);
+        expect(isOwnOrigin('https://svc.a.run.app', undefined)).toBe(false);
+        expect(isOwnOrigin('null', 'svc.a.run.app')).toBe(false);
+    });
+});
 
 describe('parseAllowedOrigins', () => {
     it('should return the wildcard when unset or empty', () => {

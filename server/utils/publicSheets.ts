@@ -9,6 +9,8 @@
  * `*` を指定したときだけ従来どおり全シートを公開する。
  */
 
+import { decodeEncodedList } from "./encodedList";
+
 /** 列挙ではなく全公開を表す番兵 */
 export const PUBLIC_ALL_SHEETS = "*";
 
@@ -33,6 +35,32 @@ export function parsePublicSheets(
 
   if (names.includes(PUBLIC_ALL_SHEETS)) return PUBLIC_ALL_SHEETS;
   return names;
+}
+
+/**
+ * 環境変数から公開シートを決める。
+ *
+ * platform がテナントごとに渡す `PUBLIC_SHEETS_B64`（base64url の JSON 配列）を優先する。
+ * 日本語のシート名もそのまま運べる。こちらでは `*` を受け付けない（全公開は運営者が
+ * `PUBLIC_SHEETS=*` で明示したときだけにする）。
+ * 値が壊れていたら既定の公開シートに戻す。未設定と同じ扱いで、公開範囲は広がらない。
+ */
+export function resolvePublicSheets(env: {
+  PUBLIC_SHEETS?: string;
+  PUBLIC_SHEETS_B64?: string;
+}): string[] | typeof PUBLIC_ALL_SHEETS {
+  const encoded = env.PUBLIC_SHEETS_B64;
+  if (encoded) {
+    const names = decodeEncodedList(encoded);
+    if (names === null) {
+      console.error(
+        "[config] PUBLIC_SHEETS_B64 is malformed; falling back to the default public sheets.",
+      );
+      return [...DEFAULT_PUBLIC_SHEETS];
+    }
+    return names.filter((name) => name !== PUBLIC_ALL_SHEETS);
+  }
+  return parsePublicSheets(env.PUBLIC_SHEETS);
 }
 
 /**

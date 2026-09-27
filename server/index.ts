@@ -15,14 +15,15 @@ import { ChatService, resolveRequestId } from "./services/chat";
 import {
   ALLOW_ALL_ORIGINS,
   isOriginAllowed,
-  parseAllowedOrigins,
+  isOwnOrigin,
+  resolveAllowedOrigins,
 } from "./utils/origin";
 import { resolveClientIp, toRateLimitKey } from "./utils/clientIp";
 import { ConnectionCounter } from "./utils/connectionCounter";
 import {
   PUBLIC_ALL_SHEETS,
   isSheetPublic,
-  parsePublicSheets,
+  resolvePublicSheets,
 } from "./utils/publicSheets";
 import { ConcurrencyLimiter } from "./utils/concurrencyLimiter";
 import { createProxyHeaderLogger } from "./utils/proxyDiagnostics";
@@ -53,7 +54,8 @@ const logProxyHeaders = config.logProxyHeaders
   : null;
 
 // Security: API から公開するシートを限定する（既定は settings / items / news）
-const publicSheets = parsePublicSheets(process.env.PUBLIC_SHEETS);
+// platform がテナントごとに渡す PUBLIC_SHEETS_B64 を優先する。
+const publicSheets = resolvePublicSheets(process.env);
 if (publicSheets === PUBLIC_ALL_SHEETS) {
   console.info(
     "[config] PUBLIC_SHEETS=* exposes every sheet except 'prompt' and 'private_*' via /api/:sheetName.",
@@ -63,7 +65,11 @@ if (publicSheets === PUBLIC_ALL_SHEETS) {
 }
 
 // Security: Use environment variable for allowed origins
-const allowedOrigins = parseAllowedOrigins(process.env.ALLOWED_ORIGINS);
+// platform がテナントごとに渡す ALLOWED_ORIGINS_B64 を優先する。
+const allowedOrigins = resolveAllowedOrigins(process.env);
+if (allowedOrigins !== ALLOW_ALL_ORIGINS) {
+  console.info(`[config] Allowed origins: ${allowedOrigins.join(", ") || "(none)"}`);
+}
 
 if (allowedOrigins === ALLOW_ALL_ORIGINS) {
   // 埋め込み先を限定しない運用ではこれが正しい状態なので、警告ではなく事実として記録する。
@@ -116,7 +122,8 @@ const io = new Server(httpServer, {
   // WebSocket 直結（transports: ["websocket"]）なら第三者サイトからそのまま接続できてしまうため、ハンドシェイク時に明示的に Origin を照合して拒否する。
   allowRequest: (req, callback) => {
     const origin = req.headers.origin;
-    if (isOriginAllowed(origin, allowedOrigins)) {
+    // 自分自身のページ（/demo）は許可リストに関係なく繋げる
+    if (isOriginAllowed(origin, allowedOrigins) || isOwnOrigin(origin, req.headers.host)) {
       return callback(null, true);
     }
     console.warn(`[Socket] Rejected handshake from disallowed origin: ${origin}`);

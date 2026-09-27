@@ -1,10 +1,44 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
     DEFAULT_PUBLIC_SHEETS,
     PUBLIC_ALL_SHEETS,
     isSheetPublic,
     parsePublicSheets,
+    resolvePublicSheets,
 } from './publicSheets';
+import { encodeList } from './encodedList';
+
+describe('resolvePublicSheets', () => {
+    it('should use PUBLIC_SHEETS when the encoded value is absent', () => {
+        expect(resolvePublicSheets({ PUBLIC_SHEETS: 'faqs' })).toEqual(['faqs']);
+        expect(resolvePublicSheets({})).toEqual([...DEFAULT_PUBLIC_SHEETS]);
+    });
+
+    it('should prefer PUBLIC_SHEETS_B64 and keep Japanese sheet names', () => {
+        expect(
+            resolvePublicSheets({
+                PUBLIC_SHEETS: '*',
+                PUBLIC_SHEETS_B64: encodeList(['settings', 'よくある質問']),
+            }),
+        ).toEqual(['settings', 'よくある質問']);
+    });
+
+    it('should not allow the wildcard through the encoded value', () => {
+        // 全公開は運営者が PUBLIC_SHEETS=* で明示したときだけにする
+        expect(resolvePublicSheets({ PUBLIC_SHEETS_B64: encodeList(['*', 'items']) })).toEqual(['items']);
+    });
+
+    it('should treat an encoded empty list as exposing nothing', () => {
+        expect(resolvePublicSheets({ PUBLIC_SHEETS_B64: encodeList([]) })).toEqual([]);
+    });
+
+    it('should fall back to the defaults when the encoded value is malformed', () => {
+        const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        expect(resolvePublicSheets({ PUBLIC_SHEETS_B64: 'not;valid' })).toEqual([...DEFAULT_PUBLIC_SHEETS]);
+        expect(errSpy).toHaveBeenCalled();
+        errSpy.mockRestore();
+    });
+});
 
 describe('parsePublicSheets', () => {
     it('should fall back to the default list when unset', () => {
