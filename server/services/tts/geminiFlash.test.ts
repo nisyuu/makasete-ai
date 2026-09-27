@@ -25,6 +25,7 @@ function makeResult(parts: { inlineData?: { mimeType: string; data: string }; te
                 yield { candidates: [{ content: { parts: chunkParts } }] };
             }
         })(),
+        response: Promise.resolve({}),
     };
 }
 
@@ -73,6 +74,23 @@ describe('GeminiFlashTTSService', () => {
         const chunks = await collect(await new GeminiFlashTTSService().generateSpeechStream('やあ。'));
 
         expect(chunks.map((c) => [...c])).toEqual([[1, 2], [3, 4, 5, 6]]);
+    });
+
+    it('should not leave the aggregated response rejection unhandled when the stream fails', async () => {
+        // SDK はストリームが途中で失敗すると result.response も reject する
+        const response = Promise.reject(new Error('Error reading from the stream'));
+        const catchSpy = vi.spyOn(response, 'catch');
+        generateContentStream.mockResolvedValue({
+            stream: (async function* () {
+                yield* [];
+                throw new Error('Error reading from the stream');
+            })(),
+            response,
+        });
+
+        const stream = await new GeminiFlashTTSService().generateSpeechStream('やあ。');
+        await expect(collect(stream)).rejects.toThrow('Error reading from the stream');
+        expect(catchSpy).toHaveBeenCalled();
     });
 
     it('should reuse the model across calls', async () => {

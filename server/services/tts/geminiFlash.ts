@@ -48,6 +48,9 @@ export class GeminiFlashTTSService implements TTSService {
     public async generateSpeechStream(text: string, _language = "ja"): Promise<Readable> {
         try {
             const result = await this.getModel().generateContentStream(text);
+            // SDK は同じ応答を集約した result.response も作り、ストリームが途中で失敗すると reject する。
+            // 使わないまま放置すると未処理の reject になるので握りつぶす。失敗は result.stream 側の 'error' で扱う。
+            result.response.catch(() => {});
             return Readable.from(
                 (async function* () {
                     for await (const chunk of result.stream) {

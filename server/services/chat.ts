@@ -19,6 +19,13 @@ import { resolveLanguage } from "../utils/language";
 /** リクエスト ID を付けて応答イベントを送る関数 */
 type EmitFn = (event: string, payload?: Record<string, unknown>) => void;
 
+const XML_ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
+
+/** XML の実体参照を元の文字に戻す。順に置換すると &amp;lt; が < まで戻りすぎるので、1回の置換で処理する。 */
+function decodeXmlEntities(text: string): string {
+  return text.replace(/&(amp|lt|gt|quot|apos);/g, (_, name: string) => XML_ENTITIES[name]);
+}
+
 /**
  * クライアントが付けたリクエスト ID を検証する。
  * 任意の値をそのまま送り返すと巨大なペイロードの反射に使われうるので、
@@ -351,6 +358,14 @@ export class ChatService {
 
   // Prepares the TTS input string, applying SSML pause tuning for Google TTS.
   private prepareTTSInput(sentence: string, ttsProviderName: string): string | null {
+    // Gemini の音声生成モデルは SSML を解釈せず、タグや &amp; などの実体参照まで読み上げてしまう。
+    // cleanupForTTS は SSML 向けに & を &amp; にするので、それも戻してプレーンテキストで渡す。
+    if (ttsProviderName === "gemini-flash-tts") {
+      const plain = isSsml(sentence) ? decodeXmlEntities(sentence.replace(/<[^>]*>/g, "")) : sentence;
+      const text = decodeXmlEntities(cleanupForTTS(plain)).trim();
+      return text || null;
+    }
+
     // すでに SSML として組み立てられた文だけを素通しする。
     // `hasTags` は `<[^>]*>` に一致するだけなので、LLM が出力した「A<B>C」や「<br>」でも真になり、無エスケープのまま <speak> に包まれて TTS の SSML パースエラーを招く（その文だけ音声が無言になる）。
     // 先頭が <speak> の場合に限定し、それ以外は必ずエスケープ経路へ送る。
@@ -358,8 +373,6 @@ export class ChatService {
       const innerText = sentence.replace(/<\/?speak>/g, "").trim();
       const ssmlContent = removeMarkdownLinks(innerText);
       if (!ssmlContent.trim() || !ssmlContent.replace(/<[^>]*>/g, "").trim()) return null;
-      // Gemini の音声生成モデルは SSML を解釈せず、タグまで読み上げてしまう。
-      if (ttsProviderName === "gemini-flash-tts") return ssmlContent.replace(/<[^>]*>/g, "").trim();
       return `<speak>${ssmlContent}</speak>`;
     }
 

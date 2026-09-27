@@ -371,6 +371,28 @@ describe('ChatService', () => {
             expect(generateSpeechStream.mock.calls[0][0]).toBe('こんにちは元気です。');
         });
 
+        it('should decode XML entities left after stripping SSML for Gemini Flash TTS', async () => {
+            getTTSService.mockReturnValueOnce({ generateSpeechStream, getName: () => 'gemini-flash-tts', pcmSampleRate: 24000 });
+            generateResponseStream.mockResolvedValue(makeStream(['<speak>A&amp;B と 1&lt;2 と &amp;lt;。</speak>']));
+            const socket = makeSocket();
+            const svc = new ChatService();
+
+            await svc.handleUserInput(socket as never, { text: 'hi', isVoiceInput: true });
+
+            expect(generateSpeechStream.mock.calls[0][0]).toBe('A&B と 1<2 と &lt;。');
+        });
+
+        it('should not escape ampersands in plain text for Gemini Flash TTS', async () => {
+            getTTSService.mockReturnValueOnce({ generateSpeechStream, getName: () => 'gemini-flash-tts', pcmSampleRate: 24000 });
+            generateResponseStream.mockResolvedValue(makeStream(['A&B の [詳細](https://example.com) です。']));
+            const socket = makeSocket();
+            const svc = new ChatService();
+
+            await svc.handleUserInput(socket as never, { text: 'hi', isVoiceInput: true });
+
+            expect(generateSpeechStream.mock.calls[0][0]).toBe('A&B の 詳細 です。');
+        });
+
         it('should send plain text without SSML to Gemini Flash TTS', async () => {
             getTTSService.mockReturnValueOnce({ generateSpeechStream, getName: () => 'gemini-flash-tts', pcmSampleRate: 24000 });
             generateResponseStream.mockResolvedValue(makeStream(['はい、そうです。']));
