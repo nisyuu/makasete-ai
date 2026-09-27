@@ -2,7 +2,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 /** 対応している TTS プロバイダ */
-const TTS_PROVIDERS = ['gemini', 'elevenlabs'] as const;
+const TTS_PROVIDERS = ['gemini', 'gemini-flash-tts', 'elevenlabs'] as const;
 export type TTSProvider = (typeof TTS_PROVIDERS)[number];
 
 function resolveTtsProvider(value: string | undefined): TTSProvider {

@@ -171,7 +171,9 @@ export class ChatService {
                   console.error("[TTS] Failed to discard stream:", message);
                 });
             }
-            return this.drainStreamToSocket(emit, streamPromise);
+            return ttsService.pcmSampleRate
+              ? this.forwardPcmStreamToSocket(emit, streamPromise, ttsService.pcmSampleRate)
+              : this.drainStreamToSocket(emit, streamPromise);
           });
         } else {
           emit("text-chunk", { content: uiText });
@@ -308,6 +310,45 @@ export class ChatService {
     });
   }
 
+  // ヘッダ無しの PCM は断片ごとに単独で再生できるので、MP3 のように文全体を待たずに届いた順に送る。
+  // これで最初の音が出るまでが TTS の生成完了ではなく最初の断片の到着で決まる。
+  // 16bit のサンプルが断片の境目で割れると、それ以降の音がすべてノイズになる。奇数バイトは次の断片に持ち越す。
+  private async forwardPcmStreamToSocket(
+    emit: EmitFn,
+    streamPromise: Promise<NodeJS.ReadableStream | null>,
+    sampleRate: number,
+  ): Promise<void> {
+    const audioStream = await streamPromise;
+    if (!audioStream) return;
+
+    await new Promise<void>((resolve) => {
+      let carry: Buffer = Buffer.alloc(0);
+
+      audioStream.on("data", (chunk: Buffer) => {
+        const data = carry.length > 0 ? Buffer.concat([carry, chunk]) : chunk;
+        const evenLength = data.length - (data.length % 2);
+        carry = data.subarray(evenLength);
+        if (evenLength > 0) {
+          emit("audio-chunk", {
+            type: "audio",
+            content: data.subarray(0, evenLength),
+            format: "pcm_s16le",
+            sampleRate,
+          });
+        }
+      });
+
+      audioStream.on("end", () => resolve());
+
+      audioStream.on("error", (err) => {
+        console.error("[TTS] Stream error:", err);
+        resolve(); // Continue to next sentence rather than aborting the chain
+      });
+
+      audioStream.resume();
+    });
+  }
+
   // Prepares the TTS input string, applying SSML pause tuning for Google TTS.
   private prepareTTSInput(sentence: string, ttsProviderName: string): string | null {
     // すでに SSML として組み立てられた文だけを素通しする。
@@ -317,6 +358,8 @@ export class ChatService {
       const innerText = sentence.replace(/<\/?speak>/g, "").trim();
       const ssmlContent = removeMarkdownLinks(innerText);
       if (!ssmlContent.trim() || !ssmlContent.replace(/<[^>]*>/g, "").trim()) return null;
+      // Gemini の音声生成モデルは SSML を解釈せず、タグまで読み上げてしまう。
+      if (ttsProviderName === "gemini-flash-tts") return ssmlContent.replace(/<[^>]*>/g, "").trim();
       return `<speak>${ssmlContent}</speak>`;
     }
 
