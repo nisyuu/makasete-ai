@@ -40,7 +40,7 @@ const { ioMock, fakeSocket } = vi.hoisted(() => {
 
 vi.mock('socket.io-client', () => ({ io: ioMock }));
 
-import { initSocketHandler } from './socketHandler';
+import { initSocketHandler, sanitizeProducts } from './socketHandler';
 
 describe('initSocketHandler', () => {
     beforeEach(() => {
@@ -102,6 +102,25 @@ describe('initSocketHandler', () => {
         expect(warnSpy).toHaveBeenCalled();
         expect(cbs.onError).not.toHaveBeenCalled();
         warnSpy.mockRestore();
+    });
+
+    it('should ignore malformed payloads instead of passing them to the UI', () => {
+        const { cbs } = setup();
+
+        fakeSocket.handlers['text-chunk']();
+        fakeSocket.handlers['text-chunk']({ content: 123 });
+        expect(cbs.onTextChunk).not.toHaveBeenCalled();
+
+        fakeSocket.handlers['audio-chunk']({ type: 'text', content: { x: 1 } });
+        fakeSocket.handlers['audio-chunk']({ type: 'video', content: 'x' });
+        fakeSocket.handlers['audio-chunk']();
+        expect(cbs.onAudioChunk).not.toHaveBeenCalled();
+
+        fakeSocket.handlers['error']({ message: { nested: true } });
+        expect(cbs.onError).toHaveBeenCalledWith('Unknown error');
+
+        fakeSocket.handlers['recommendation']({ products: 'not-an-array' });
+        expect(cbs.onRecommendation).toHaveBeenCalledWith([]);
     });
 
     it('should route socket events to the corresponding callbacks', () => {
@@ -300,5 +319,25 @@ describe('initSocketHandler', () => {
 
         handler.disconnect();
         expect(fakeSocket.disconnect).toHaveBeenCalled();
+    });
+});
+
+describe('sanitizeProducts', () => {
+    it('should keep only named products and coerce fields to strings', () => {
+        const result = sanitizeProducts([
+            { name: 'A', price: 100, url: 'https://a.example', image_url: null },
+            { name: '' },
+            { price: '1' },
+            null,
+            'str',
+        ]);
+        expect(result).toEqual([
+            { name: 'A', description: '', price: '', image_url: '', url: 'https://a.example', tags: '' },
+        ]);
+    });
+
+    it('should return an empty list for non-array input', () => {
+        expect(sanitizeProducts(undefined)).toEqual([]);
+        expect(sanitizeProducts({ name: 'A' })).toEqual([]);
     });
 });

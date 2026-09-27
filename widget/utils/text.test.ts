@@ -29,8 +29,14 @@ describe('widget text utilities', () => {
     it('should sanitize dangerous URLs in markdown links', () => {
       const input = 'Click [here](javascript:alert("xss"))';
       const output = formatMessageText(input);
-      expect(output).toContain('href="#"');
+      expect(output).not.toContain('<a ');
       expect(output).not.toContain('javascript:');
+    });
+
+    it('should keep the link text without a link when the URL is rejected', () => {
+      // href="#" + target="_blank" だとクリックでホストページ自身が新しいタブで開く
+      const output = formatMessageText('Click [here](javascript:void) now');
+      expect(output).toBe('Click <span>here</span> now');
     });
 
     it('should handle relative paths in markdown links', () => {
@@ -44,7 +50,7 @@ describe('widget text utilities', () => {
       // これらは「相対パス」のふりをして外部サイトへ飛ぶ
       for (const url of ['/\\evil.example/x', '/\t/evil.example/x', '/\n/evil.example/x', '/\\\\evil.example']) {
         const output = formatMessageText(`[bank](${url})`);
-        expect(output).toContain('href="#"');
+        expect(output).not.toContain('<a ');
         expect(output).not.toContain('evil.example');
       }
     });
@@ -53,14 +59,14 @@ describe('widget text utilities', () => {
       // "//evil.example" は先頭が "/" なので素朴な相対パス判定をすり抜け、
       // 表示テキストと遷移先が食い違うリンクになる。
       const output = formatMessageText('Click [your bank](//evil.example/login)');
-      expect(output).toContain('href="#"');
+      expect(output).not.toContain('<a ');
       expect(output).not.toContain('evil.example/login"');
     });
 
     it('should block backslash-prefixed and whitespace-padded dangerous URLs', () => {
-      expect(formatMessageText('[x](  javascript:alert(1))')).toContain('href="#"');
-      expect(formatMessageText('[x](data:text/html,<script>)')).toContain('href="#"');
-      expect(formatMessageText('[x](vbscript:msgbox)')).toContain('href="#"');
+      expect(formatMessageText('[x](  javascript:alert(1))')).not.toContain('<a ');
+      expect(formatMessageText('[x](data:text/html,<script>)')).toBe('<span>x</span>');
+      expect(formatMessageText('[x](vbscript:msgbox)')).toBe('<span>x</span>');
     });
 
     it('should still allow absolute http and https links', () => {

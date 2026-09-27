@@ -3,14 +3,6 @@ declare module '*?inline' {
     export default content
 }
 
-interface ImportMetaEnv {
-    readonly VITE_SERVER_URL: string;
-}
-
-interface ImportMeta {
-    readonly env: ImportMetaEnv;
-}
-
 // TypeScript 6.0 added SpeechRecognitionEvent to its DOM lib but not
 // the SpeechRecognition constructor or window properties. Declare them here
 // since @types/dom-speech-recognition no longer provides them for TS 6.0+.

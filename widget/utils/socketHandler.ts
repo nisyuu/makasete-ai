@@ -39,6 +39,30 @@ interface ServerEvent {
   requestId?: unknown;
 }
 
+const PRODUCT_FIELDS = ["name", "description", "price", "image_url", "url", "tags"] as const;
+
+/**
+ * サーバーから届いた商品リストを検証する。
+ * 型が崩れた値を UI に渡すと、エスケープ処理の .replace などで例外になり
+ * 表示全体が止まるため、名前を持つ商品だけを文字列にそろえて通す。
+ */
+export function sanitizeProducts(value: unknown): Product[] {
+  if (!Array.isArray(value)) return [];
+  const products: Product[] = [];
+  for (const item of value) {
+    if (item === null || typeof item !== "object") continue;
+    const record = item as Record<string, unknown>;
+    if (typeof record.name !== "string" || record.name === "") continue;
+    const product = {} as Product;
+    for (const field of PRODUCT_FIELDS) {
+      const fieldValue = record[field];
+      product[field] = typeof fieldValue === "string" ? fieldValue : "";
+    }
+    products.push(product);
+  }
+  return products;
+}
+
 /**
  * Socket.io の接続・イベントハンドリングを初期化する
  */
@@ -130,23 +154,33 @@ export function initSocketHandler(
     reportConnectionLost("disconnected");
   });
 
-  socket.on("text-chunk", (data: { content: string } & ServerEvent) => {
+  // サーバーからのペイロードは型を確かめてから UI に渡す。文字列でない値が
+  // 表示処理に入ると例外で UI が止まる。
+
+  socket.on("text-chunk", (data?: { content?: unknown } & ServerEvent) => {
     if (!isCurrent(data)) return;
+    if (typeof data?.content !== "string") return;
     onTextChunk(data.content);
   });
 
   socket.on(
     "audio-chunk",
-    (data: { type: "text" | "audio"; content: unknown } & ServerEvent) => {
-      if (!isCurrent(data)) return;
-      onAudioChunk(data);
+    (data?: { type?: unknown; content?: unknown } & ServerEvent) => {
+      if (!isCurrent(data) || !data) return;
+      if (data.type === "text") {
+        if (typeof data.content !== "string") return;
+        onAudioChunk({ type: "text", content: data.content });
+      } else if (data.type === "audio") {
+        // 音声データの形式は audioHandler 側で検証する
+        onAudioChunk({ type: "audio", content: data.content });
+      }
     },
   );
 
-  socket.on("error", (data: { message: string } & ServerEvent) => {
+  socket.on("error", (data?: { message?: unknown } & ServerEvent) => {
     if (!isCurrent(data)) return;
     finishRequest();
-    onError(data.message);
+    onError(typeof data?.message === "string" ? data.message : "Unknown error");
   });
 
   socket.on("response-complete", (data?: ServerEvent) => {
@@ -155,9 +189,9 @@ export function initSocketHandler(
     onResponseComplete?.();
   });
 
-  socket.on("recommendation", (data: { products: Product[] } & ServerEvent) => {
+  socket.on("recommendation", (data?: { products?: unknown } & ServerEvent) => {
     if (!isCurrent(data)) return;
-    onRecommendation?.(data.products);
+    onRecommendation?.(sanitizeProducts(data?.products));
   });
 
   function emitUserInput(payload: Record<string, unknown>): void {
