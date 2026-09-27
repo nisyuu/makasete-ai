@@ -215,69 +215,20 @@ SPA などでウィジェットが不要になったときは `window.MakaseteAI
 
 ## デプロイ (Google Cloud Run)
 
-> **注意**: 稼働中の Cloud Run サービスとビルド基盤は、別リポジトリ `makasete-ai-platform` が管理しています。このリポジトリの `terraform/` は現在どのリソースも管理しておらず、`terraform apply` を実行してはいけません。詳細は [terraform/README.md](terraform/README.md) を参照してください。
->
-> 以下の手順は、このリポジトリ単体で新規に環境を構築する場合の参考情報です。
+稼働中の Cloud Run サービス（テナントごとに 1 つ）とビルド基盤は、別リポジトリ `makasete-ai-platform` が管理しています。インフラの定義はそちらにあり、このリポジトリにはありません。
 
-本システムは、複数のスプレッドシート（Makaseteサーバー）を同時にホストすることが可能です。
+main にマージした変更を手動で反映する場合は、サービスごとにイメージをビルドしてデプロイします。
 
-1. **Dockerイメージのビルドとプッシュ**:
-   初回のみ、手動でビルドとプッシュを行います。
-   ```bash
-   gcloud builds submit --tag asia-northeast1-docker.pkg.dev/[PROJECT_ID]/makasete-ai-repo/makasete-ai:latest
-   ```
-2. **環境設定 (`terraform/terraform.tfvars`)**:
-   `terraform/terraform.tfvars.example` を参考に、Makaseteサーバーの設定およびGitHub連携設定を記述します。
+```bash
+# 手元の鍵ファイルなどを送らないよう、main をまっさらに取り出してからビルドする
+git worktree add --detach /tmp/makasete-main origin/main
+cd /tmp/makasete-main
+SHA=$(git rev-parse --short HEAD)
+R=asia-northeast1-docker.pkg.dev/[PROJECT_ID]/makasete-ai-repo
+SERVICE=makasete-ai-xxxxxxxx   # テナントの Cloud Run サービス名
 
-   ```hcl
-   project_id = "your-project-id"
-   container_image = "asia-northeast1-docker.pkg.dev/..."
+gcloud builds submit --tag $R/$SERVICE:$SHA --region asia-northeast1 .
+gcloud run deploy $SERVICE --image $R/$SERVICE:$SHA --region asia-northeast1
+```
 
-   github_repository    = "your-username/makasete-ai"
-   github_connection_id = "your-github-connection-id" # Cloud Buildの接続ID
-
-   makasete_servers = {
-     # ...
-   }
-   ```
-
-   API キーは `terraform.tfvars` に書きません。Terraform に値を渡すと state ファイルに平文で保存されるため、次の手順で Secret Manager に直接登録します。
-
-3. **Secret の作成と API キーの登録**:
-   まず Secret の箱だけを作ります。
-   ```bash
-   cd terraform
-   terraform init
-   terraform apply \
-     -target=google_secret_manager_secret.server_secrets \
-     -target=google_secret_manager_secret_iam_member.server_secret_accessor
-   ```
-   出力された `secret_ids` の各 Secret に、API キーを登録します。キーはシェル履歴に残らないよう標準入力から渡してください。
-   ```bash
-   # Makaseteサーバーごとに実行（server-1 は makasete_servers のキー）
-   printf '%s' "$GEMINI_API_KEY" | gcloud secrets versions add makasete-ai-server-1-gemini-api-key --data-file=-
-
-   # tts_provider = "elevenlabs" の場合のみ
-   printf '%s' "$ELEVENLABS_API_KEY" | gcloud secrets versions add makasete-ai-server-1-elevenlabs-api-key --data-file=-
-   ```
-   キーを変更したいときも同じコマンドで新しいバージョンを追加します。Cloud Run は `latest` を参照するため、次のデプロイから反映されます。
-
-4. **Terraformの適用**:
-   ```bash
-   terraform apply
-   ```
-   実行後、各Makaseteサーバーの URL と **Cloud Build トリガーID** が出力されます。
-
-### 既存環境からの移行（API キーを tfvars に書いていた場合）
-
-以前の構成では API キーを `terraform.tfvars` に書き、Cloud Run の環境変数へ平文で渡していました。移行時は次の手順を踏んでください。
-
-1. 上記の手順 3 で Secret を作り、API キーを登録する。
-2. `terraform.tfvars` の `makasete_servers` から `gemini_api_key` と `elevenlabs_api_key` を削除する（残っていても無視されますが、ファイルには平文で残ります）。
-3. `terraform apply` で Cloud Run の環境変数を Secret 参照に切り替える。
-4. **API キーをローテーションする。** 旧キーは `terraform.tfstate` とそのバックアップ、Cloud Run の過去のリビジョンに平文で残っています。Google AI Studio と ElevenLabs で新しいキーを発行して手順 3 と同じ方法で登録し、旧キーを無効化してください。
-5. 旧キーを含む `terraform.tfstate.backup` を削除する。
-
-### 自動スケール
-
-`terraform/scheduler.tf` により、毎日 09:00 (JST) に起動し、21:00 (JST) に自動停止するスケジュールが設定されます。
+`gcloud run deploy` に `--image` だけを渡すと、環境変数やサービスアカウントは現状のまま引き継がれます。イメージのタグは別のイメージ名へ付け替えられないため、サービスごとにビルドしてください。
