@@ -32,6 +32,7 @@ const audioHandler = {
     initAudioContext: vi.fn(),
     resumeAudioContext: vi.fn(() => Promise.resolve()),
     resetAudioState: vi.fn(),
+    beginResponse: vi.fn(),
     toggleRecording: vi.fn(),
     isSpeechRecognitionSupported: vi.fn(() => true),
     cleanup: vi.fn(),
@@ -509,10 +510,10 @@ describe('initChatWidget (rich UI)', () => {
             // テキスト入力で送った場合も、前の応答の読み上げを止める
             initChatWidget();
             const { input, sendBtn } = getEls();
-            audioHandler.resetAudioState.mockClear();
+            audioHandler.beginResponse.mockClear();
             input.value = 'next question';
             sendBtn.click();
-            expect(audioHandler.resetAudioState).toHaveBeenCalled();
+            expect(audioHandler.beginResponse).toHaveBeenCalled();
         });
     });
 
@@ -596,7 +597,7 @@ describe('initChatWidget (rich UI)', () => {
             expect(micBtn.classList.contains('recording')).toBe(false);
             expect(socketHandler.sendUserInput).toHaveBeenCalledWith('voice text', true, 'ja');
             expect(audioHandler.resumeAudioContext).toHaveBeenCalled();
-            expect(audioHandler.resetAudioState).toHaveBeenCalled();
+            expect(audioHandler.beginResponse).toHaveBeenCalled();
         });
 
         it('onRecordingEnd with empty text should not send and just clear recording', () => {

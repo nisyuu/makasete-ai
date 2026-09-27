@@ -227,12 +227,26 @@ describe('initAudioHandler', () => {
             expect(createdSources[0].stop).toHaveBeenCalled();
         });
 
+        it('should drop the rest of the response after resetAudioState until beginResponse', async () => {
+            // 読み上げ OFF やウィンドウを閉じた後に、同じ応答の続きが鳴り出さないようにする
+            const { handler } = setup();
+            handler.resetAudioState();
+            handler.handleAudioChunk(new ArrayBuffer(2));
+            handler.handleAudioChunk(new Uint8Array([0, 0]), { sampleRate: 24000 });
+            await flush();
+            expect(createdSources).toHaveLength(0);
+
+            handler.beginResponse();
+            handler.handleAudioChunk(new Uint8Array([0, 0]), { sampleRate: 24000 });
+            expect(createdSources).toHaveLength(1);
+        });
+
         it('should not play a chunk whose decode finishes after a reset', async () => {
             // decode 待ちの間に新しいメッセージを送る（リセットされる）と、
             // 古い音声が decode 完了後に鳴って新しい音声と重なっていた。
             const { handler } = setup();
             handler.handleAudioChunk(new ArrayBuffer(2)); // 古い応答（decode 中）
-            handler.resetAudioState(); // 新しいメッセージを送信
+            handler.beginResponse(); // 新しいメッセージを送信
             await flush();
             expect(createdSources).toHaveLength(0);
         });
@@ -240,7 +254,7 @@ describe('initAudioHandler', () => {
         it('should play the new response alone after a reset during decode', async () => {
             const { handler } = setup();
             handler.handleAudioChunk(new ArrayBuffer(2)); // 古い応答（decode 中）
-            handler.resetAudioState();
+            handler.beginResponse();
             handler.handleAudioChunk(new ArrayBuffer(4)); // 新しい応答
             await flush();
             await flush();
@@ -252,7 +266,7 @@ describe('initAudioHandler', () => {
         it('should keep the queue working after a stale decode is dropped', async () => {
             const { handler } = setup();
             handler.handleAudioChunk(new ArrayBuffer(2));
-            handler.resetAudioState();
+            handler.beginResponse();
             await flush();
 
             handler.handleAudioChunk(new ArrayBuffer(2));
@@ -337,7 +351,7 @@ describe('initAudioHandler', () => {
             handler.handleAudioChunk(pcm(new Array(2400).fill(0)), { sampleRate: 24000 });
             handler.handleAudioChunk(pcm(new Array(2400).fill(0)), { sampleRate: 24000 });
 
-            handler.resetAudioState();
+            handler.beginResponse();
             expect(createdSources[0].stop).toHaveBeenCalled();
             expect(createdSources[1].stop).toHaveBeenCalled();
 
@@ -423,11 +437,23 @@ describe('initAudioHandler', () => {
             expect(createdSources).toHaveLength(0);
         });
 
-        it('should resume playing after recording stops', async () => {
+        it('should keep the interrupted response silent after recording stops without sending', async () => {
+            // 録音で割り込んだ応答の続きが、何も送らずに録音を止めた後に鳴り出さないようにする
             const { handler } = setup();
             const rec = createdRecognitions[0];
             handler.toggleRecording(); // 録音開始
             rec.onend!(); // 録音終了（onend で isRecording が false になる）
+            handler.handleAudioChunk(new ArrayBuffer(2));
+            await flush();
+            expect(createdSources).toHaveLength(0);
+        });
+
+        it('should play the next response after recording stops and a question is sent', async () => {
+            const { handler } = setup();
+            const rec = createdRecognitions[0];
+            handler.toggleRecording();
+            rec.onend!();
+            handler.beginResponse();
             handler.handleAudioChunk(new ArrayBuffer(2));
             await flush();
             expect(createdSources).toHaveLength(1);

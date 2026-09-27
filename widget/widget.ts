@@ -376,7 +376,7 @@ export function initChatWidget(config: WidgetConfig = {}): () => void {
 
     // 新しい質問を送ったら、前の応答の読み上げは止める（割り込み）。
     // テキスト入力で送った場合も、前の応答の音声が鳴り続けないようにする。
-    audio.resetAudioState();
+    audio.beginResponse();
     if (useAudio) {
       audio.resumeAudioContext().catch(console.error);
     }

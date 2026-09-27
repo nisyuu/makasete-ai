@@ -24,8 +24,13 @@ export interface AudioHandler {
   initAudioContext: () => void;
   /** AudioContextをresumeする */
   resumeAudioContext: () => Promise<void>;
-  /** 再生中の音声を停止してキューをクリアする */
+  /**
+   * 再生中の音声を停止してキューをクリアし、次の beginResponse まで届く音声を捨てる。
+   * 読み上げ OFF・ウィンドウを閉じる・録音開始など、今の応答をもう聞かせないときに使う。
+   */
   resetAudioState: () => void;
+  /** 前の応答の音声を停止し、新しい応答の音声を受け付け始める。質問を送るときに使う。 */
+  beginResponse: () => void;
   /** 音声認識を開始/停止トグルする。トグル後に録音中なら true を返す。 */
   toggleRecording: () => boolean;
   /** 音声認識が利用可能かどうか */
@@ -51,6 +56,9 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
   // resetAudioState のたびに進める世代番号。decodeAudioData の完了を待って
   // いる間にリセットされた場合、古い世代の音声を再生しないために使う。
   let playbackGeneration = 0;
+  // resetAudioState の後、同じ応答の残りの音声を鳴らさないためのフラグ。
+  // PCM は1文が数十ミリ秒の断片で届くので、止めても直後の断片で文の続きが鳴ってしまう。
+  let isMuted = false;
 
   // PCM の再生予約。断片は数十ミリ秒と短く、onended で次を始めると継ぎ目ごとに隙間が空いて音が途切れる。
   // AudioContext の時計で前の断片の終わる時刻に次を予約し、隙間なく並べる。
@@ -185,7 +193,7 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
 
   function handleAudioChunk(content: unknown, pcm?: PcmFormat): void {
     // 録音中はボットの発話を再生しない（マイクが自分の音声を拾うのを防ぐ）
-    if (isRecording) return;
+    if (isRecording || isMuted) return;
 
     let rawData: ArrayBuffer;
 
@@ -220,6 +228,16 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
   }
 
   function resetAudioState(): void {
+    stopPlayback();
+    isMuted = true;
+  }
+
+  function beginResponse(): void {
+    stopPlayback();
+    isMuted = false;
+  }
+
+  function stopPlayback(): void {
     // decode 待ちの音声を無効化する
     playbackGeneration += 1;
     if (currentSource) {
@@ -357,6 +375,7 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
     initAudioContext,
     resumeAudioContext,
     resetAudioState,
+    beginResponse,
     toggleRecording,
     isSpeechRecognitionSupported,
     cleanup,
