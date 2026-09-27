@@ -12,7 +12,7 @@ This document defines the shared rules and standards for all AI agents interacti
 
 -   **Runtime**: Node.js v24 (LTS)
 -   **Package Manager**: `pnpm` (v10+) - `npm` や `yarn` は使用禁止。
--   **Main LLM**: Google Gemini API (`gemini-3.5-flash`) - 実装は `server/services/gemini.ts` を参照。
+-   **Main LLM**: Google Gemini API (`gemini-3.8-flash`) - 実装は `server/services/gemini.ts` を参照。
 -   **Development Agent**: Claude Code Action (`@claude` メンション・`/review` コメント) - 設定は `.github/workflows/claude.yml` と `claude-code-review.yml`。
 -   **Frontend**: Vanilla TypeScript + Vite (No Heavy Frameworks like React/Vue in the widget itself)
 -   **Backend**: Express + Socket.io
