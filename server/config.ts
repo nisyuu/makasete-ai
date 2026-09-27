@@ -5,16 +5,21 @@ dotenv.config();
 const TTS_PROVIDERS = ['gemini', 'gemini-flash-tts', 'elevenlabs'] as const;
 export type TTSProvider = (typeof TTS_PROVIDERS)[number];
 
-function resolveTtsProvider(value: string | undefined): TTSProvider {
-    if (!value) return 'gemini';
+// 既定は Gemini 3.8 Flash Lite TTS。最初の音が出るまでが Chirp 3: HD（'gemini'）より短い。
+// makasete-ai-platform のデプロイは --set-env-vars で環境変数を丸ごと置き換えるので、
+// 本番で使いたい値は環境変数ではなくこの既定値で決める。
+const DEFAULT_TTS_PROVIDER: TTSProvider = 'gemini-flash-tts';
+
+export function resolveTtsProvider(value: string | undefined): TTSProvider {
+    if (!value) return DEFAULT_TTS_PROVIDER;
     if ((TTS_PROVIDERS as readonly string[]).includes(value)) {
         return value as TTSProvider;
     }
     console.warn(
-        `[config] Unknown TTS_PROVIDER "${value}". Falling back to "gemini". ` +
+        `[config] Unknown TTS_PROVIDER "${value}". Falling back to "${DEFAULT_TTS_PROVIDER}". ` +
         `Supported values: ${TTS_PROVIDERS.join(', ')}.`,
     );
-    return 'gemini';
+    return DEFAULT_TTS_PROVIDER;
 }
 
 function resolvePort(value: string | undefined): number {
