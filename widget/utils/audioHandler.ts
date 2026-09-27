@@ -1,3 +1,5 @@
+import type { PcmFormat } from "../types";
+
 interface BufferData {
   type: "Buffer";
   data: number[];
@@ -13,8 +15,11 @@ export interface AudioHandlerOptions {
 }
 
 export interface AudioHandler {
-  /** 音声チャンクをキューに追加して再生する */
-  handleAudioChunk: (content: unknown) => void;
+  /**
+   * 音声チャンクを再生する。pcm が無ければ MP3 などの1文分のファイルとしてキューに積み、
+   * pcm があればヘッダ無しの PCM 断片として前の断片の直後に予約する。
+   */
+  handleAudioChunk: (content: unknown, pcm?: PcmFormat) => void;
   /** AudioContextを初期化する（ユーザー操作後に呼ぶ） */
   initAudioContext: () => void;
   /** AudioContextをresumeする */
@@ -46,6 +51,11 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
   // resetAudioState のたびに進める世代番号。decodeAudioData の完了を待って
   // いる間にリセットされた場合、古い世代の音声を再生しないために使う。
   let playbackGeneration = 0;
+
+  // PCM の再生予約。断片は数十ミリ秒と短く、onended で次を始めると継ぎ目ごとに隙間が空いて音が途切れる。
+  // AudioContext の時計で前の断片の終わる時刻に次を予約し、隙間なく並べる。
+  const pcmSources = new Set<AudioBufferSourceNode>();
+  let pcmNextStartTime = 0;
 
   // 音声認識
   let recognition: SpeechRecognition | null = null;
@@ -139,7 +149,41 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
     }
   }
 
-  function handleAudioChunk(content: unknown): void {
+  function schedulePcmChunk(rawData: ArrayBuffer, sampleRate: number): void {
+    if (!audioContext) initAudioContext();
+    if (!audioContext) return;
+
+    const sampleCount = Math.floor(rawData.byteLength / 2);
+    if (sampleCount === 0) return;
+
+    let audioBuffer: AudioBuffer;
+    try {
+      audioBuffer = audioContext.createBuffer(1, sampleCount, sampleRate);
+    } catch (e) {
+      console.error("[MakaseteAI] Unsupported PCM sample rate:", e);
+      return;
+    }
+    const channel = audioBuffer.getChannelData(0);
+    const view = new DataView(rawData);
+    for (let i = 0; i < sampleCount; i++) {
+      channel[i] = view.getInt16(i * 2, true) / 32768;
+    }
+
+    const source = audioContext.createBufferSource();
+    source.buffer = audioBuffer;
+    if (gainNode) source.connect(gainNode);
+    source.onended = () => {
+      pcmSources.delete(source);
+    };
+
+    // 前の断片がもう鳴り終わっていれば（文の合間など）すぐに鳴らす
+    const startAt = Math.max(audioContext.currentTime, pcmNextStartTime);
+    source.start(startAt);
+    pcmNextStartTime = startAt + audioBuffer.duration;
+    pcmSources.add(source);
+  }
+
+  function handleAudioChunk(content: unknown, pcm?: PcmFormat): void {
     // 録音中はボットの発話を再生しない（マイクが自分の音声を拾うのを防ぐ）
     if (isRecording) return;
 
@@ -166,6 +210,11 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
       return;
     }
 
+    if (pcm) {
+      schedulePcmChunk(rawData, pcm.sampleRate);
+      return;
+    }
+
     audioQueue.push(rawData);
     playNextInQueue();
   }
@@ -183,6 +232,15 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
     }
     isPlaying = false;
     audioQueue.length = 0;
+    for (const source of pcmSources) {
+      try {
+        source.stop();
+      } catch {
+        // すでに停止済みの場合は無視
+      }
+    }
+    pcmSources.clear();
+    pcmNextStartTime = 0;
   }
 
   // --- 音声認識 ---

@@ -1,7 +1,7 @@
 import { io, Socket } from "socket.io-client";
-import type { Product } from "../types";
+import type { PcmFormat, Product } from "../types";
 
-export type { Product };
+export type { PcmFormat, Product };
 
 /**
  * 接続が失われたときの理由。
@@ -13,7 +13,11 @@ export type ConnectionLostReason = "connect-timeout" | "disconnected";
 export interface SocketHandlerOptions {
   serverUrl: string;
   onTextChunk: (content: string) => void;
-  onAudioChunk: (data: { type: "text" | "audio"; content: unknown }) => void;
+  onAudioChunk: (
+    data:
+      | { type: "text"; content: string }
+      | { type: "audio"; content: unknown; pcm?: PcmFormat },
+  ) => void;
   onError: (message: string) => void;
   onConnect?: () => void;
   onResponseComplete?: () => void;
@@ -165,14 +169,34 @@ export function initSocketHandler(
 
   socket.on(
     "audio-chunk",
-    (data?: { type?: unknown; content?: unknown } & ServerEvent) => {
+    (
+      data?: {
+        type?: unknown;
+        content?: unknown;
+        format?: unknown;
+        sampleRate?: unknown;
+      } & ServerEvent,
+    ) => {
       if (!isCurrent(data) || !data) return;
       if (data.type === "text") {
         if (typeof data.content !== "string") return;
         onAudioChunk({ type: "text", content: data.content });
       } else if (data.type === "audio") {
         // 音声データの形式は audioHandler 側で検証する
-        onAudioChunk({ type: "audio", content: data.content });
+        if (data.format === undefined) {
+          onAudioChunk({ type: "audio", content: data.content });
+        } else if (
+          data.format === "pcm_s16le" &&
+          typeof data.sampleRate === "number" &&
+          Number.isFinite(data.sampleRate) &&
+          data.sampleRate > 0
+        ) {
+          onAudioChunk({
+            type: "audio",
+            content: data.content,
+            pcm: { sampleRate: data.sampleRate },
+          });
+        }
       }
     },
   );

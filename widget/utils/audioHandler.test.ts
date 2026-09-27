@@ -36,9 +36,30 @@ class MockGainNode {
     connect = vi.fn();
 }
 
+class MockAudioBuffer {
+    readonly duration: number;
+    private readonly channel: Float32Array;
+    constructor(
+        readonly numberOfChannels: number,
+        readonly length: number,
+        readonly sampleRate: number,
+    ) {
+        this.duration = length / sampleRate;
+        this.channel = new Float32Array(length);
+    }
+    getChannelData(_i: number) {
+        return this.channel;
+    }
+}
+
 class MockAudioContext {
     state: 'running' | 'suspended' = 'suspended';
+    currentTime = 0;
     destination = {};
+    createBuffer = vi.fn((channels: number, length: number, sampleRate: number) => {
+        if (sampleRate < 3000) throw new Error('NotSupportedError');
+        return new MockAudioBuffer(channels, length, sampleRate);
+    });
     createGain = vi.fn(() => new MockGainNode());
     createBufferSource = vi.fn(() => {
         const s = new MockBufferSource();
@@ -243,6 +264,104 @@ describe('initAudioHandler', () => {
             createdSources[0].onended?.();
             await flush();
             expect(createdSources).toHaveLength(2);
+        });
+    });
+
+    describe('PCM playback', () => {
+        const ctx = () => (window as unknown as { __lastCtx: MockAudioContext }).__lastCtx;
+        // 16bit リトルエンディアンの PCM を組み立てる
+        const pcm = (samples: number[]) => {
+            const view = new DataView(new ArrayBuffer(samples.length * 2));
+            samples.forEach((v, i) => view.setInt16(i * 2, v, true));
+            return view.buffer;
+        };
+
+        it('should convert 16-bit PCM to floats without decodeAudioData', () => {
+            const { handler } = setup();
+            handler.handleAudioChunk(pcm([0, 16384, -32768]), { sampleRate: 24000 });
+
+            expect(ctx().decodeAudioData).not.toHaveBeenCalled();
+            expect(ctx().createBuffer).toHaveBeenCalledWith(1, 3, 24000);
+            const buffer = createdSources[0].buffer as MockAudioBuffer;
+            expect([...buffer.getChannelData(0)]).toEqual([0, 0.5, -1]);
+        });
+
+        it('should schedule consecutive chunks back to back without gaps', () => {
+            const { handler } = setup();
+            handler.initAudioContext();
+            ctx().currentTime = 1;
+
+            handler.handleAudioChunk(pcm(new Array(2400).fill(0)), { sampleRate: 24000 }); // 0.1秒
+            handler.handleAudioChunk(pcm(new Array(4800).fill(0)), { sampleRate: 24000 }); // 0.2秒
+            handler.handleAudioChunk(pcm(new Array(2400).fill(0)), { sampleRate: 24000 });
+
+            const starts = createdSources.map((s) => s.start.mock.calls[0][0] as number);
+            expect(starts[0]).toBe(1);
+            expect(starts[1]).toBeCloseTo(1.1);
+            expect(starts[2]).toBeCloseTo(1.3);
+        });
+
+        it('should start immediately when the previous chunk has already finished', () => {
+            const { handler } = setup();
+            handler.initAudioContext();
+            handler.handleAudioChunk(pcm(new Array(2400).fill(0)), { sampleRate: 24000 });
+            // 文の合間などで前の断片が鳴り終わってから次が届いた
+            ctx().currentTime = 5;
+            handler.handleAudioChunk(pcm(new Array(2400).fill(0)), { sampleRate: 24000 });
+
+            expect(createdSources[1].start).toHaveBeenCalledWith(5);
+        });
+
+        it('should drop a trailing odd byte and ignore empty chunks', () => {
+            const { handler } = setup();
+            handler.handleAudioChunk(new Uint8Array([0, 64, 9]), { sampleRate: 24000 });
+            handler.handleAudioChunk(new Uint8Array([9]), { sampleRate: 24000 });
+
+            expect(ctx().createBuffer).toHaveBeenCalledTimes(1);
+            expect(ctx().createBuffer).toHaveBeenCalledWith(1, 1, 24000);
+            expect(createdSources).toHaveLength(1);
+        });
+
+        it('should skip a chunk whose sample rate the browser rejects', () => {
+            const { handler } = setup();
+            const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+            handler.handleAudioChunk(pcm([1]), { sampleRate: 1 });
+
+            expect(createdSources).toHaveLength(0);
+            expect(errSpy).toHaveBeenCalled();
+        });
+
+        it('should stop scheduled chunks and restart the timeline on reset', () => {
+            const { handler } = setup();
+            handler.initAudioContext();
+            handler.handleAudioChunk(pcm(new Array(2400).fill(0)), { sampleRate: 24000 });
+            handler.handleAudioChunk(pcm(new Array(2400).fill(0)), { sampleRate: 24000 });
+
+            handler.resetAudioState();
+            expect(createdSources[0].stop).toHaveBeenCalled();
+            expect(createdSources[1].stop).toHaveBeenCalled();
+
+            // リセット後の新しい応答は、古い予約の後ろではなく今から鳴らす
+            ctx().currentTime = 0.05;
+            handler.handleAudioChunk(pcm(new Array(2400).fill(0)), { sampleRate: 24000 });
+            expect(createdSources[2].start).toHaveBeenCalledWith(0.05);
+        });
+
+        it('should not stop chunks that have already ended on reset', () => {
+            const { handler } = setup();
+            handler.handleAudioChunk(pcm([0]), { sampleRate: 24000 });
+            createdSources[0].onended?.();
+
+            handler.resetAudioState();
+            expect(createdSources[0].stop).not.toHaveBeenCalled();
+        });
+
+        it('should not schedule PCM while recording', () => {
+            const { handler } = setup();
+            handler.toggleRecording();
+            handler.handleAudioChunk(pcm([0]), { sampleRate: 24000 });
+
+            expect(createdSources).toHaveLength(0);
         });
     });
 

@@ -307,11 +307,11 @@ export function initChatWidget(config: WidgetConfig = {}): () => void {
           els.timeline,
           messageState,
           "makasete-server",
-          data.content as string,
+          data.content,
           true,
         );
       } else if (data.type === "audio") {
-        audio.handleAudioChunk(data.content);
+        audio.handleAudioChunk(data.content, data.pcm);
       }
     },
     onError: (message) => {
