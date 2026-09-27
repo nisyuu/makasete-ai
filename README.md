@@ -26,28 +26,19 @@ ECサイトやサービスサイトに簡単導入でき、音声とテキスト
 
 ### バックエンド (Server)
 
-- **技術スタック**: Node.js (v24), Express, Socket.io, **LangChain (LangGraph)**
+- **技術スタック**: Node.js (v24), Express, Socket.io
 - **AI処理**:
   - **LLM**: Google Gemini API (gemini-3.5-flash)
-  - **オーケストレーション**: LangChain / LangGraph によるエージェント構成
   - **TTS**: Google Cloud Text-to-Speech (デフォルト, Chirp 3: HD ボイス) または ElevenLabs API
 - **データ連携**: Google Sheets API (商品情報・FAQ・サービス紹介・システムプロンプトの取得)
 
-## 自律型開発エージェント (Autonomous Agent)
+## 開発支援エージェント (Claude Code)
 
-本プロジェクトには、GitHub Issue や Pull Request を元に、自律的にコード修正・テスト・PR作成を行うエージェントが搭載されています。
+開発には、GitHub 上で動く [Claude Code Action](https://github.com/anthropics/claude-code-action) を使っています。
 
-- **技術スタック**: LangGraph, Claude Sonnet 4.6 (Anthropic)
-- **2つの実行モード**:
-  1. **自動モード (`ai-power` ラベル)**:
-     - Issue に `ai-power` ラベルを付与すると自動起動。
-     - コード分析、プラン作成、修正、テストを最大 5 回まで繰り返し、最終的な修正を Pull Request として送信。
-  2. **対話モード (`@claude` メンション)**:
-     - Issue または Pull Request のコメントで `@claude` とメンションすることで起動（リポジトリオーナーのみ）。
-     - **意図判定**: 「コード修正（IMPLEMENT）」か「会話・質問（CHAT）」かを自動判別。
-     - **会話モード**: コードを修正せず、質問への回答や実装方針のアドバイスをコメントで返信。
-     - **実装モード**: 指示に従ってファイルを修正。PR 上でのメンション時は、その PR のブランチを自動で更新（Push）し、実行結果をコメントで報告。
-- **実行環境**: GitHub Actions (`.github/workflows/autonomous-agent.yml`, `.github/workflows/claude.yml`)
+- **`@claude` メンション**: Issue や Pull Request（本文・コメント・レビュー）で `@claude` とメンションすると起動します（リポジトリオーナーのみ）。質問への回答や、コードの修正・PR ブランチへの push を行います。
+- **`/review` コメント**: Pull Request に `/review` とコメントすると、コードレビューを実行します（リポジトリオーナーのみ）。
+- **実行環境**: GitHub Actions (`.github/workflows/claude.yml`, `.github/workflows/claude-code-review.yml`)
 
 ## セキュリティ対策
 

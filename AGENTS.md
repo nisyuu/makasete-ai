@@ -13,9 +13,10 @@ This document defines the shared rules and standards for all AI agents interacti
 -   **Runtime**: Node.js v24 (LTS)
 -   **Package Manager**: `pnpm` (v10+) - `npm` や `yarn` は使用禁止。
 -   **Main LLM**: Google Gemini API (`gemini-3.5-flash`) - 実装は `server/services/gemini.ts` を参照。
--   **Autonomous Agent**: LangGraph + Claude 4.6 Sonnet
+-   **Development Agent**: Claude Code Action (`@claude` メンション・`/review` コメント) - 設定は `.github/workflows/claude.yml` と `claude-code-review.yml`。
 -   **Frontend**: Vanilla TypeScript + Vite (No Heavy Frameworks like React/Vue in the widget itself)
--   **Backend**: Express + Socket.io + LangChain/LangGraph
+-   **Backend**: Express + Socket.io
+-   **TTS**: Google Cloud Text-to-Speech（既定）または ElevenLabs - `TTS_PROVIDER` で切り替え。実装は `server/services/tts/` を参照。
 
 ## コーディング規約 (Coding Standards)
 
@@ -46,6 +47,5 @@ pnpm tsx path/to/script.ts
 ## 自律型エージェントへの指示 (Directives for Agents)
 
 -   **Refactoring**: 既存の `ChatWidget` クラスをリファクタリングする際は、DOM操作を直接行う現在のスタイルを尊重しつつ、モジュール化を進めてください。JSX/TSX の導入は慎重に検討し、依存関係の最小化を優先してください。
--   **PR Creation**: `scripts/agent.ts` を修正する際は、LangGraph のステート定義と各ノードの責務を明確に分離してください。
 -   **Deployment**: インフラ（Cloud Run・Cloud Build・Secret Manager）は別リポジトリ `makasete-ai-platform` で管理しています。このリポジトリに Terraform を戻さないでください。GitHub Actions (`.github/workflows/`) の変更を行う際は、セキュリティ（Secret Manager の利用など）に最大限配慮してください。
 -   **Workflows**: `.github/workflows/` ディレクトリ内のファイルは変更しないでください。
