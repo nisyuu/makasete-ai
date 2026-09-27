@@ -6,7 +6,7 @@ interface HistoryEntry {
     parts: { text: string }[];
 }
 const sendMessageStream = vi.fn();
-const startChat = vi.fn((_opts: { history: HistoryEntry[] }) => ({ sendMessageStream }));
+const startChat = vi.fn((_opts: { history: HistoryEntry[]; systemInstruction: HistoryEntry }) => ({ sendMessageStream }));
 const getGenerativeModel = vi.fn(() => ({ startChat }));
 
 vi.mock('@google/generative-ai', () => ({
@@ -132,37 +132,44 @@ describe('Gemini service utilities', () => {
             expect(sendMessageStream).toHaveBeenCalledWith('Hello');
         });
 
-        it('should seed the chat history with system instruction and acknowledgement', async () => {
+        it('should pass the system prompt as systemInstruction, not as a chat turn', async () => {
             (getSystemPrompt as ReturnType<typeof vi.fn>).mockReturnValue('Base system prompt');
             const allData = new Map<string, Record<string, string>[]>();
             await generateResponseStream('Q', allData, [{ role: 'user', parts: [{ text: 'prev' }] }], 'ja');
 
-            const historyArg = startChat.mock.calls[0][0].history;
-            expect(historyArg[0].role).toBe('user');
-            expect(historyArg[0].parts[0].text).toContain('Base system prompt');
-            expect(historyArg[0].parts[0].text).toContain('日本語で回答してください。');
-            expect(historyArg[1].role).toBe('model');
-            expect(historyArg[1].parts[0].text).toContain('承知いたしました');
-            // user provided history appended
-            expect(historyArg[2].parts[0].text).toBe('prev');
+            const opts = startChat.mock.calls[0][0];
+            expect(opts.systemInstruction.parts[0].text).toContain('Base system prompt');
+            expect(opts.systemInstruction.parts[0].text).toContain('日本語で回答してください。');
+            // 会話履歴にはユーザーの履歴だけが入る
+            expect(opts.history).toEqual([{ role: 'user', parts: [{ text: 'prev' }] }]);
         });
 
-        it('should use the English language prompt and acknowledgement', async () => {
+        it('should drop leading model turns so the history starts with a user turn', async () => {
+            const allData = new Map<string, Record<string, string>[]>();
+            await generateResponseStream('Q', allData, [
+                { role: 'model', parts: [{ text: 'orphan' }] },
+                { role: 'user', parts: [{ text: 'u1' }] },
+                { role: 'model', parts: [{ text: 'm1' }] },
+            ]);
+
+            const historyArg = startChat.mock.calls[0][0].history;
+            expect(historyArg.map((t) => t.parts[0].text)).toEqual(['u1', 'm1']);
+        });
+
+        it('should use the English language prompt', async () => {
             const allData = new Map<string, Record<string, string>[]>();
             await generateResponseStream('Q', allData, [], 'en');
 
-            const historyArg = startChat.mock.calls[0][0].history;
-            expect(historyArg[0].parts[0].text).toContain('Please respond in English.');
-            expect(historyArg[1].parts[0].text).toContain('Understood.');
+            const opts = startChat.mock.calls[0][0];
+            expect(opts.systemInstruction.parts[0].text).toContain('Please respond in English.');
         });
 
         it('should fall back to the Japanese prompt for an unknown language', async () => {
             const allData = new Map<string, Record<string, string>[]>();
             await generateResponseStream('Q', allData, [], 'fr');
 
-            const historyArg = startChat.mock.calls[0][0].history;
-            expect(historyArg[0].parts[0].text).toContain('日本語で回答してください。');
-            expect(historyArg[1].parts[0].text).toContain('承知いたしました');
+            const opts = startChat.mock.calls[0][0];
+            expect(opts.systemInstruction.parts[0].text).toContain('日本語で回答してください。');
         });
 
         it('should use a default base prompt when getSystemPrompt is empty', async () => {
@@ -170,8 +177,8 @@ describe('Gemini service utilities', () => {
             const allData = new Map<string, Record<string, string>[]>();
             await generateResponseStream('Q', allData, []);
 
-            const historyArg = startChat.mock.calls[0][0].history;
-            expect(historyArg[0].parts[0].text).toContain('あなたは親切なAIアシスタントです。');
+            const opts = startChat.mock.calls[0][0];
+            expect(opts.systemInstruction.parts[0].text).toContain('あなたは親切なAIアシスタントです。');
         });
 
         it('should rethrow and log when sendMessageStream fails', async () => {

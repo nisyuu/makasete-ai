@@ -1,4 +1,4 @@
-import { formatMessageText } from "./text";
+import { escapeHtml, formatMessageText } from "./text";
 import type { Product } from "../types";
 
 export interface UIElements {
@@ -127,14 +127,6 @@ export function appendMessage(
   div.innerHTML = formatMessageText(text);
   timeline.appendChild(div);
   scrollToBottom(timeline);
-}
-
-function escapeHtml(str: string): string {
-  return str.replace(
-    /[&<>"']/g,
-    (m) =>
-      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[m] || m,
-  );
 }
 
 /**

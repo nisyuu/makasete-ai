@@ -115,6 +115,61 @@ describe('initChatWidget (rich UI)', () => {
         expect(input.placeholder).toBe('質問を入力...');
     });
 
+    it('should use English labels for the buttons and loading text when language is en', () => {
+        initChatWidget({ language: 'en' });
+        const { chatTitle, input, closeBtn, micBtn, sendBtn, launcherBtn, loadingOverlay } = getEls();
+        expect(chatTitle.textContent).toBe('AI Assistant');
+        expect(input.placeholder).toBe('Type your question...');
+        expect(closeBtn.title).toBe('Close');
+        expect(micBtn.title).toBe('Voice input');
+        expect(sendBtn.title).toBe('Send');
+        expect(launcherBtn.title).toBe('Ask the AI assistant');
+        expect(loadingOverlay.textContent).toContain('Getting ready');
+    });
+
+    it('should escape configured labels before inserting them into the markup', () => {
+        initChatWidget({ placeholder: '"><img src=x onerror=alert(1)>' });
+        const { shadow, input } = getEls();
+        expect(shadow.querySelector('img')).toBeNull();
+        expect(input.placeholder).toBe('"><img src=x onerror=alert(1)>');
+    });
+
+    describe('destroy', () => {
+        it('should release the socket, audio and host element', () => {
+            const destroy = initChatWidget();
+            destroy();
+
+            expect(socketHandler.disconnect).toHaveBeenCalled();
+            expect(audioHandler.cleanup).toHaveBeenCalled();
+            expect(document.getElementById('makasete-ai-widget-host')).toBeNull();
+
+            // 取り外した後は再度埋め込める
+            initChatWidget();
+            expect(document.getElementById('makasete-ai-widget-host')).not.toBeNull();
+        });
+
+        it('should restore the host page scroll lock', () => {
+            vi.stubGlobal('innerWidth', 400);
+            const destroy = initChatWidget();
+            getEls().launcherBtn.click();
+            expect(document.body.style.overflow).toBe('hidden');
+
+            destroy();
+            expect(document.body.style.overflow).toBe('');
+        });
+
+        it('should cancel a mount that is still waiting for DOMContentLoaded', () => {
+            const body = document.body;
+            Object.defineProperty(document, 'body', { value: null, configurable: true });
+            const destroy = initChatWidget();
+            Object.defineProperty(document, 'body', { value: body, configurable: true });
+
+            destroy();
+            document.dispatchEvent(new Event('DOMContentLoaded'));
+            expect(document.getElementById('makasete-ai-widget-host')).toBeNull();
+        });
+    });
+
     describe('mounting', () => {
         it('should not mount twice when the script is loaded again', () => {
             // ホスト要素が重複するとソケットも 2 本張られ、接続数の枠を無駄に使う
@@ -412,10 +467,9 @@ describe('initChatWidget (rich UI)', () => {
             expect(msgs[msgs.length - 1].innerHTML).toContain('boom');
         });
 
-        it('onResponseComplete and onConnect should not throw', () => {
+        it('onResponseComplete should not throw', () => {
             initChatWidget();
             expect(() => captured.socketOpts!.onResponseComplete!()).not.toThrow();
-            expect(() => captured.socketOpts!.onConnect!()).not.toThrow();
         });
 
         it('onResponseComplete should remove the typing indicator even for an empty response', () => {

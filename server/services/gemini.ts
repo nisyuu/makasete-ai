@@ -1,11 +1,10 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenerativeAI, type Content, type GenerativeModel } from "@google/generative-ai";
 import { config } from "../config";
 import { getSystemPrompt, SheetData } from "./sheets";
 import { resolveLanguage } from "../utils/language";
 
 let genAI: GoogleGenerativeAI;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let model: any;
+let model: GenerativeModel | undefined;
 
 export function initGemini() {
     if (!config.geminiApiKey) {
@@ -59,13 +58,15 @@ const LANGUAGE_PROMPTS: Record<string, string> = Object.assign(
     },
 );
 
-const LANGUAGE_ACK: Record<string, string> = Object.assign(
-    Object.create(null),
-    {
-        en: "Understood. I have reviewed the provided information and am ready to assist.",
-        ja: "承知いたしました。提供された情報を把握しました。接客を開始します。",
-    },
-);
+/**
+ * Gemini の履歴は user ターンから始まる必要があり、model ターンが先頭だと
+ * startChat が例外を投げる。履歴の切り詰めや割り込み時の取り除きで
+ * 並びが崩れても応答全体が失敗しないよう、先頭の model ターンは捨てる。
+ */
+function trimLeadingModelTurns(history: Content[]): Content[] {
+    const firstUser = history.findIndex((turn) => turn.role === "user");
+    return firstUser === -1 ? [] : history.slice(firstUser);
+}
 
 /**
  * Generates a text response stream from Gemini.
@@ -74,8 +75,7 @@ const LANGUAGE_ACK: Record<string, string> = Object.assign(
 export async function generateResponseStream(
     prompt: string,
     allData: Map<string, SheetData[]>,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    history: any[] = [],
+    history: Content[] = [],
     language = "ja",
     // 新しい入力で割り込まれたときに生成を打ち切るためのシグナル。
     // for await を break するだけでは受信を止めるだけで、Gemini 側の生成は
@@ -92,18 +92,15 @@ export async function generateResponseStream(
     const systemInstruction = buildSystemInstruction(basePrompt, allData) + `\n${langInstruction}`;
 
     try {
+        if (!model) {
+            throw new Error("Gemini model is not initialized (GEMINI_API_KEY is missing)");
+        }
+        // システムプロンプトは会話ターンではなく systemInstruction として渡す。
+        // 疑似的な user/model ターンで渡すと、ユーザー発話と同じ役割に並ぶため、
+        // 「上の指示を無視して」のような入力に上書きされやすい。
         const chat = model.startChat({
-            history: [
-                {
-                    role: "user",
-                    parts: [{ text: systemInstruction }]
-                },
-                {
-                    role: "model",
-                    parts: [{ text: LANGUAGE_ACK[safeLanguage] ?? LANGUAGE_ACK.ja }]
-                },
-                ...history
-            ]
+            systemInstruction: { role: "system", parts: [{ text: systemInstruction }] },
+            history: trimLeadingModelTurns(history),
         });
 
         const result = signal
