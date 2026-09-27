@@ -116,6 +116,13 @@ describe('initSocketHandler', () => {
         fakeSocket.handlers['audio-chunk']();
         expect(cbs.onAudioChunk).not.toHaveBeenCalled();
 
+        fakeSocket.handlers['audio-chunk']({ type: 'audio', content: 'x', format: 'opus' });
+        fakeSocket.handlers['audio-chunk']({ type: 'audio', content: 'x', format: 'pcm_s16le' });
+        fakeSocket.handlers['audio-chunk']({ type: 'audio', content: 'x', format: 'pcm_s16le', sampleRate: '24000' });
+        fakeSocket.handlers['audio-chunk']({ type: 'audio', content: 'x', format: 'pcm_s16le', sampleRate: 0 });
+        fakeSocket.handlers['audio-chunk']({ type: 'audio', content: 'x', format: 'pcm_s16le', sampleRate: Infinity });
+        expect(cbs.onAudioChunk).not.toHaveBeenCalled();
+
         fakeSocket.handlers['error']({ message: { nested: true } });
         expect(cbs.onError).toHaveBeenCalledWith('Unknown error');
 
@@ -135,6 +142,9 @@ describe('initSocketHandler', () => {
         const audioData = { type: 'audio', content: 'x' };
         fakeSocket.handlers['audio-chunk'](audioData);
         expect(cbs.onAudioChunk).toHaveBeenCalledWith(audioData);
+
+        fakeSocket.handlers['audio-chunk']({ type: 'audio', content: 'y', format: 'pcm_s16le', sampleRate: 24000 });
+        expect(cbs.onAudioChunk).toHaveBeenLastCalledWith({ type: 'audio', content: 'y', pcm: { sampleRate: 24000 } });
 
         fakeSocket.handlers['error']({ message: 'oops' });
         expect(cbs.onError).toHaveBeenCalledWith('oops');

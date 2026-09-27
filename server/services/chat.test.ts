@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Readable } from 'stream';
+import type { TTSService } from './tts/types';
 
 const { getAllSheetData, getInternalSheetData, generateResponseStream, generateSpeechStream, getTTSService } = vi.hoisted(() => {
     const generateSpeechStream = vi.fn();
@@ -8,7 +9,7 @@ const { getAllSheetData, getInternalSheetData, generateResponseStream, generateS
         getInternalSheetData: vi.fn(),
         generateResponseStream: vi.fn(),
         generateSpeechStream,
-        getTTSService: vi.fn(() => ({ generateSpeechStream, getName: (): string => 'mock' })),
+        getTTSService: vi.fn((): TTSService => ({ generateSpeechStream, getName: (): string => 'mock' })),
     };
 });
 
@@ -299,6 +300,108 @@ describe('ChatService', () => {
             // 断片ごとではなく1文=1チャンクで送信される
             expect(audioEmits).toHaveLength(1);
             expect((audioEmits[0][1].content as Buffer).toString()).toBe('AUDIO');
+        });
+
+        it('should forward PCM TTS parts one by one with their format', async () => {
+            // ヘッダ無しの PCM は断片ごとに再生できるので、文全体を待たずに届いた順に送る
+            getTTSService.mockReturnValueOnce({ generateSpeechStream, getName: () => 'gemini-flash-tts', pcmSampleRate: 24000 });
+            generateResponseStream.mockResolvedValue(makeStream(['やあ。']));
+            generateSpeechStream.mockResolvedValue(
+                Readable.from([Buffer.from([1, 2]), Buffer.from([3, 4, 5, 6])]),
+            );
+            const socket = makeSocket();
+            const svc = new ChatService();
+
+            await svc.handleUserInput(socket as never, { text: 'hi', isVoiceInput: true });
+
+            const audioEmits = socket.emit.mock.calls.filter(
+                (c) => c[0] === 'audio-chunk' && c[1].type === 'audio',
+            );
+            expect(audioEmits.map((c) => [...(c[1].content as Buffer)])).toEqual([[1, 2], [3, 4, 5, 6]]);
+            for (const [, payload] of audioEmits) {
+                expect(payload).toMatchObject({ format: 'pcm_s16le', sampleRate: 24000 });
+            }
+        });
+
+        it('should carry an odd trailing PCM byte over to the next part', async () => {
+            // 16bit のサンプルが断片の境目で割れたまま送ると、それ以降の音がノイズになる
+            getTTSService.mockReturnValueOnce({ generateSpeechStream, getName: () => 'gemini-flash-tts', pcmSampleRate: 24000 });
+            generateResponseStream.mockResolvedValue(makeStream(['やあ。']));
+            generateSpeechStream.mockResolvedValue(
+                Readable.from([Buffer.from([1, 2, 3]), Buffer.from([4, 5, 6]), Buffer.from([7])]),
+            );
+            const socket = makeSocket();
+            const svc = new ChatService();
+
+            await svc.handleUserInput(socket as never, { text: 'hi', isVoiceInput: true });
+
+            const audioEmits = socket.emit.mock.calls.filter(
+                (c) => c[0] === 'audio-chunk' && c[1].type === 'audio',
+            );
+            // 最後の1バイトはサンプルとして完結しないので捨てる
+            expect(audioEmits.map((c) => [...(c[1].content as Buffer)])).toEqual([[1, 2], [3, 4, 5, 6]]);
+        });
+
+        it('should keep sentence order when forwarding PCM', async () => {
+            getTTSService.mockReturnValueOnce({ generateSpeechStream, getName: () => 'gemini-flash-tts', pcmSampleRate: 24000 });
+            generateResponseStream.mockResolvedValue(makeStream(['一つ目。', '二つ目。']));
+            generateSpeechStream
+                .mockResolvedValueOnce(Readable.from([Buffer.from([1, 1]), Buffer.from([1, 2])]))
+                .mockResolvedValueOnce(Readable.from([Buffer.from([2, 1])]));
+            const socket = makeSocket();
+            const svc = new ChatService();
+
+            await svc.handleUserInput(socket as never, { text: 'hi', isVoiceInput: true });
+
+            const audioEmits = socket.emit.mock.calls.filter(
+                (c) => c[0] === 'audio-chunk' && c[1].type === 'audio',
+            );
+            expect(audioEmits.map((c) => [...(c[1].content as Buffer)])).toEqual([[1, 1], [1, 2], [2, 1]]);
+        });
+
+        it('should strip SSML tags for Gemini Flash TTS', async () => {
+            // Gemini の音声生成モデルは SSML を解釈せず、タグまで読み上げてしまう
+            getTTSService.mockReturnValueOnce({ generateSpeechStream, getName: () => 'gemini-flash-tts', pcmSampleRate: 24000 });
+            generateResponseStream.mockResolvedValue(makeStream(['<speak>こんにちは<break time="300ms"/>元気です。</speak>']));
+            const socket = makeSocket();
+            const svc = new ChatService();
+
+            await svc.handleUserInput(socket as never, { text: 'hi', isVoiceInput: true });
+
+            expect(generateSpeechStream.mock.calls[0][0]).toBe('こんにちは元気です。');
+        });
+
+        it('should decode XML entities left after stripping SSML for Gemini Flash TTS', async () => {
+            getTTSService.mockReturnValueOnce({ generateSpeechStream, getName: () => 'gemini-flash-tts', pcmSampleRate: 24000 });
+            generateResponseStream.mockResolvedValue(makeStream(['<speak>A&amp;B と 1&lt;2 と &amp;lt;。</speak>']));
+            const socket = makeSocket();
+            const svc = new ChatService();
+
+            await svc.handleUserInput(socket as never, { text: 'hi', isVoiceInput: true });
+
+            expect(generateSpeechStream.mock.calls[0][0]).toBe('A&B と 1<2 と &lt;。');
+        });
+
+        it('should not escape ampersands in plain text for Gemini Flash TTS', async () => {
+            getTTSService.mockReturnValueOnce({ generateSpeechStream, getName: () => 'gemini-flash-tts', pcmSampleRate: 24000 });
+            generateResponseStream.mockResolvedValue(makeStream(['A&B の [詳細](https://example.com) です。']));
+            const socket = makeSocket();
+            const svc = new ChatService();
+
+            await svc.handleUserInput(socket as never, { text: 'hi', isVoiceInput: true });
+
+            expect(generateSpeechStream.mock.calls[0][0]).toBe('A&B の 詳細 です。');
+        });
+
+        it('should send plain text without SSML to Gemini Flash TTS', async () => {
+            getTTSService.mockReturnValueOnce({ generateSpeechStream, getName: () => 'gemini-flash-tts', pcmSampleRate: 24000 });
+            generateResponseStream.mockResolvedValue(makeStream(['はい、そうです。']));
+            const socket = makeSocket();
+            const svc = new ChatService();
+
+            await svc.handleUserInput(socket as never, { text: 'hi', isVoiceInput: true });
+
+            expect(generateSpeechStream.mock.calls[0][0]).toBe('はい、そうです。');
         });
 
         it('should not emit an audio chunk for an empty TTS stream', async () => {

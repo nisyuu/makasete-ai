@@ -1,10 +1,17 @@
-import { GoogleGenerativeAI, type Content, type GenerativeModel } from "@google/generative-ai";
+import { GoogleGenerativeAI, type Content, type GenerationConfig, type GenerativeModel } from "@google/generative-ai";
 import { config } from "../config";
 import { getSystemPrompt, SheetData } from "./sheets";
 import { resolveLanguage } from "../utils/language";
 
 let genAI: GoogleGenerativeAI;
 let model: GenerativeModel | undefined;
+
+// @google/generative-ai 0.24 の型には thinkingConfig が無いが、generationConfig はそのまま API に渡される。
+// 3.8 Flash は既定だと思考に時間を使い、最初のトークンが 3.5 Flash より遅くなる。
+// 低遅延を優先して思考を "low" に抑える（"minimal" は 3.8 Flash が受け付けない）。
+const generationConfig: GenerationConfig & { thinkingConfig: { thinkingLevel: "low" } } = {
+    thinkingConfig: { thinkingLevel: "low" },
+};
 
 export function initGemini() {
     if (!config.geminiApiKey) {
@@ -13,7 +20,7 @@ export function initGemini() {
     }
     genAI = new GoogleGenerativeAI(config.geminiApiKey);
     // Use the latest Flash model, non-JSON streaming mode
-    model = genAI.getGenerativeModel({ model: "gemini-3.5-flash" });
+    model = genAI.getGenerativeModel({ model: "gemini-3.8-flash", generationConfig });
 }
 
 /**
