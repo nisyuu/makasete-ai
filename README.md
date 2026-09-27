@@ -107,7 +107,14 @@ TTS_PROVIDER=gemini # (default) or elevenlabs
 ELEVENLABS_API_KEY=your_elevenlabs_key # elevenlabs使用時のみ
 ```
 
-2. サービスアカウントキー（Google Sheets/TTS用）を `google-key.json` としてルートに配置します。
+2. Google Sheets / TTS の認証は、鍵ファイルを使わずにサービスアカウントの権限を借りる方式（なりすまし）で行います。有効期限のない鍵ファイルを手元に置かないためです。
+
+   ```bash
+   gcloud auth application-default login \
+     --impersonate-service-account=local-dev-sa@[PROJECT_ID].iam.gserviceaccount.com
+   ```
+
+   自分のアカウントに、`local-dev-sa` に対する「サービス アカウント トークン作成者」（`roles/iam.serviceAccountTokenCreator`）のロールが必要です。スプレッドシートは `local-dev-sa` に共有しておきます。`GOOGLE_APPLICATION_CREDENTIALS` は設定せず、`google-key.json` も置かないでください（どちらかがあると鍵ファイルが優先されます）。
 
 ### 起動
 
@@ -151,7 +158,7 @@ SPA などでウィジェットが不要になったときは `window.MakaseteAI
 > 埋め込み先を限定しない運用では `ALLOWED_ORIGINS=*` を指定します。この場合 Origin の照合は行われないため、**費用の歯止めは IP 単位のレート制限（`MAX_CONNECTIONS_PER_CLIENT`、送信回数の上限）と同時生成数の上限（`MAX_CONCURRENT_GENERATIONS`）だけ** になります。次の点に注意してください。
 >
 > - Origin ヘッダはブラウザ以外のクライアントなら偽装できるため、origin を列挙する運用でも「ブラウザから第三者サイト経由での利用」を防ぐ手段にとどまります。
-> - 埋め込み先ごとに利用を制御・計測したい場合は、サイトごとに期限付きのトークンを発行して検証する仕組みが必要です。現時点では未実装です。
+> - テナントごとの許可サイトは、platform から `ALLOWED_ORIGINS_B64` で渡します（下記「テナントごとの設定」）。
 > - Gemini と TTS の予算アラートを設定しておくことを勧めます。
 
 ## スプレッドシートの構成
@@ -211,73 +218,44 @@ SPA などでウィジェットが不要になったときは `window.MakaseteAI
 
 列挙方式にしているのは、運営者が社内向けのシートを追加したときに、`private_` の付け忘れだけで内容が公開されるのを防ぐためです。
 
-> **注意**: テナントごとの Cloud Run サービスは別リポジトリ（`makasete-ai-platform`）の Cloud Build トリガーからデプロイされ、その際に `--set-env-vars` で環境変数が置き換わります。そのためテナント単位で `PUBLIC_SHEETS` を指定するには、platform 側のトリガー定義に substitution を追加する必要があります。現状はどのテナントも既定値（`settings,items,news`）で動作します。
+### テナントごとの設定（platform から渡す値）
+
+テナントごとの Cloud Run サービスは、別リポジトリ（`makasete-ai-platform`）の Cloud Build トリガーからデプロイされます。トリガーはシェルのコマンドに値を埋め込み、`--set-env-vars` はカンマで変数を区切ります。そのため platform からは、JSON の文字列配列を base64url で包んだ値を、次の環境変数で渡します。日本語のシート名もそのまま運べます。
+
+| 環境変数 | 中身 | 優先 |
+| :--- | :--- | :--- |
+| `PUBLIC_SHEETS_B64` | 公開するシート名の配列（例: `["settings","よくある質問"]`） | `PUBLIC_SHEETS` より優先 |
+| `ALLOWED_ORIGINS_B64` | 埋め込みを許可するサイトの origin の配列（例: `["https://shop.example"]`） | `ALLOWED_ORIGINS` より優先 |
+
+- どちらも、空文字（未設定）なら従来の `PUBLIC_SHEETS` / `ALLOWED_ORIGINS` を使います。
+- `*` は受け付けません。全公開や全許可は、運営者が `PUBLIC_SHEETS=*` / `ALLOWED_ORIGINS=*` で明示したときだけです。
+- `ALLOWED_ORIGINS_B64` が空の配列なら、許可サイトが未登録として全サイトを許可します。
+- 値が壊れている場合、公開シートは既定値に戻り、許可サイトはどのサイトも許可しません（設定ミスで公開範囲を広げないため）。
+
+値は次のように作れます。
+
+```bash
+node -e 'console.log(Buffer.from(JSON.stringify(["https://shop.example"])).toString("base64url"))'
+```
+
+許可サイトを指定しても、サーバー自身のページ（`/demo` など）からの接続は常に許可されます。WebSocket のハンドシェイクは同じサイトからでも Origin を送るため、Origin の host がリクエストの Host と一致するものを自分自身とみなします。
 
 ## デプロイ (Google Cloud Run)
 
-> **注意**: 稼働中の Cloud Run サービスとビルド基盤は、別リポジトリ `makasete-ai-platform` が管理しています。このリポジトリの `terraform/` は現在どのリソースも管理しておらず、`terraform apply` を実行してはいけません。詳細は [terraform/README.md](terraform/README.md) を参照してください。
->
-> 以下の手順は、このリポジトリ単体で新規に環境を構築する場合の参考情報です。
+稼働中の Cloud Run サービス（テナントごとに 1 つ）とビルド基盤は、別リポジトリ `makasete-ai-platform` が管理しています。インフラの定義はそちらにあり、このリポジトリにはありません。
 
-本システムは、複数のスプレッドシート（Makaseteサーバー）を同時にホストすることが可能です。
+main にマージした変更を手動で反映する場合は、サービスごとにイメージをビルドしてデプロイします。
 
-1. **Dockerイメージのビルドとプッシュ**:
-   初回のみ、手動でビルドとプッシュを行います。
-   ```bash
-   gcloud builds submit --tag asia-northeast1-docker.pkg.dev/[PROJECT_ID]/makasete-ai-repo/makasete-ai:latest
-   ```
-2. **環境設定 (`terraform/terraform.tfvars`)**:
-   `terraform/terraform.tfvars.example` を参考に、Makaseteサーバーの設定およびGitHub連携設定を記述します。
+```bash
+# 手元の鍵ファイルなどを送らないよう、main をまっさらに取り出してからビルドする
+git worktree add --detach /tmp/makasete-main origin/main
+cd /tmp/makasete-main
+SHA=$(git rev-parse --short HEAD)
+R=asia-northeast1-docker.pkg.dev/[PROJECT_ID]/makasete-ai-repo
+SERVICE=makasete-ai-xxxxxxxx   # テナントの Cloud Run サービス名
 
-   ```hcl
-   project_id = "your-project-id"
-   container_image = "asia-northeast1-docker.pkg.dev/..."
+gcloud builds submit --tag $R/$SERVICE:$SHA --region asia-northeast1 .
+gcloud run deploy $SERVICE --image $R/$SERVICE:$SHA --region asia-northeast1
+```
 
-   github_repository    = "your-username/makasete-ai"
-   github_connection_id = "your-github-connection-id" # Cloud Buildの接続ID
-
-   makasete_servers = {
-     # ...
-   }
-   ```
-
-   API キーは `terraform.tfvars` に書きません。Terraform に値を渡すと state ファイルに平文で保存されるため、次の手順で Secret Manager に直接登録します。
-
-3. **Secret の作成と API キーの登録**:
-   まず Secret の箱だけを作ります。
-   ```bash
-   cd terraform
-   terraform init
-   terraform apply \
-     -target=google_secret_manager_secret.server_secrets \
-     -target=google_secret_manager_secret_iam_member.server_secret_accessor
-   ```
-   出力された `secret_ids` の各 Secret に、API キーを登録します。キーはシェル履歴に残らないよう標準入力から渡してください。
-   ```bash
-   # Makaseteサーバーごとに実行（server-1 は makasete_servers のキー）
-   printf '%s' "$GEMINI_API_KEY" | gcloud secrets versions add makasete-ai-server-1-gemini-api-key --data-file=-
-
-   # tts_provider = "elevenlabs" の場合のみ
-   printf '%s' "$ELEVENLABS_API_KEY" | gcloud secrets versions add makasete-ai-server-1-elevenlabs-api-key --data-file=-
-   ```
-   キーを変更したいときも同じコマンドで新しいバージョンを追加します。Cloud Run は `latest` を参照するため、次のデプロイから反映されます。
-
-4. **Terraformの適用**:
-   ```bash
-   terraform apply
-   ```
-   実行後、各Makaseteサーバーの URL と **Cloud Build トリガーID** が出力されます。
-
-### 既存環境からの移行（API キーを tfvars に書いていた場合）
-
-以前の構成では API キーを `terraform.tfvars` に書き、Cloud Run の環境変数へ平文で渡していました。移行時は次の手順を踏んでください。
-
-1. 上記の手順 3 で Secret を作り、API キーを登録する。
-2. `terraform.tfvars` の `makasete_servers` から `gemini_api_key` と `elevenlabs_api_key` を削除する（残っていても無視されますが、ファイルには平文で残ります）。
-3. `terraform apply` で Cloud Run の環境変数を Secret 参照に切り替える。
-4. **API キーをローテーションする。** 旧キーは `terraform.tfstate` とそのバックアップ、Cloud Run の過去のリビジョンに平文で残っています。Google AI Studio と ElevenLabs で新しいキーを発行して手順 3 と同じ方法で登録し、旧キーを無効化してください。
-5. 旧キーを含む `terraform.tfstate.backup` を削除する。
-
-### 自動スケール
-
-`terraform/scheduler.tf` により、毎日 09:00 (JST) に起動し、21:00 (JST) に自動停止するスケジュールが設定されます。
+`gcloud run deploy` に `--image` だけを渡すと、環境変数やサービスアカウントは現状のまま引き継がれます。イメージのタグは別のイメージ名へ付け替えられないため、サービスごとにビルドしてください。

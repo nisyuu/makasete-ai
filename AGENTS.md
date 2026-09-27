@@ -47,5 +47,5 @@ pnpm tsx path/to/script.ts
 
 -   **Refactoring**: 既存の `ChatWidget` クラスをリファクタリングする際は、DOM操作を直接行う現在のスタイルを尊重しつつ、モジュール化を進めてください。JSX/TSX の導入は慎重に検討し、依存関係の最小化を優先してください。
 -   **PR Creation**: `scripts/agent.ts` を修正する際は、LangGraph のステート定義と各ノードの責務を明確に分離してください。
--   **Deployment**: Terraform (`terraform/`) や GitHub Actions (`.github/workflows/`) の変更を行う際は、セキュリティ（Secret Manager の利用など）に最大限配慮してください。
+-   **Deployment**: インフラ（Cloud Run・Cloud Build・Secret Manager）は別リポジトリ `makasete-ai-platform` で管理しています。このリポジトリに Terraform を戻さないでください。GitHub Actions (`.github/workflows/`) の変更を行う際は、セキュリティ（Secret Manager の利用など）に最大限配慮してください。
 -   **Workflows**: `.github/workflows/` ディレクトリ内のファイルは変更しないでください。
