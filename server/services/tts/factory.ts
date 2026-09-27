@@ -13,10 +13,10 @@ export function getTTSService(): TTSService {
     
     if (provider === 'elevenlabs') {
         cachedService = new ElevenLabsTTSService();
-    } else if (provider === 'gemini-flash-tts') {
-        cachedService = new GeminiFlashTTSService();
-    } else {
+    } else if (provider === 'gemini') {
         cachedService = new GeminiTTSService();
+    } else {
+        cachedService = new GeminiFlashTTSService();
     }
     
     return cachedService;

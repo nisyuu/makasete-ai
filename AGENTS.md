@@ -16,7 +16,7 @@ This document defines the shared rules and standards for all AI agents interacti
 -   **Development Agent**: Claude Code Action (`@claude` メンション・`/review` コメント) - 設定は `.github/workflows/claude.yml` と `claude-code-review.yml`。
 -   **Frontend**: Vanilla TypeScript + Vite (No Heavy Frameworks like React/Vue in the widget itself)
 -   **Backend**: Express + Socket.io
--   **TTS**: Google Cloud Text-to-Speech（既定）、Gemini 3.8 Flash Lite TTS（`gemini-flash-tts`、PCM をストリーミング）、または ElevenLabs - `TTS_PROVIDER` で切り替え。実装は `server/services/tts/` を参照。
+-   **TTS**: Gemini 3.8 Flash Lite TTS（既定、`gemini-flash-tts`、PCM をストリーミング）、Google Cloud Text-to-Speech（`gemini`）、または ElevenLabs - `TTS_PROVIDER` で切り替え。実装は `server/services/tts/` を参照。
 
 ## コーディング規約 (Coding Standards)
 
