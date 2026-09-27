@@ -107,7 +107,14 @@ TTS_PROVIDER=gemini # (default) or elevenlabs
 ELEVENLABS_API_KEY=your_elevenlabs_key # elevenlabs使用時のみ
 ```
 
-2. サービスアカウントキー（Google Sheets/TTS用）を `google-key.json` としてルートに配置します。
+2. Google Sheets / TTS の認証は、鍵ファイルを使わずにサービスアカウントの権限を借りる方式（なりすまし）で行います。有効期限のない鍵ファイルを手元に置かないためです。
+
+   ```bash
+   gcloud auth application-default login \
+     --impersonate-service-account=local-dev-sa@[PROJECT_ID].iam.gserviceaccount.com
+   ```
+
+   自分のアカウントに、`local-dev-sa` に対する「サービス アカウント トークン作成者」（`roles/iam.serviceAccountTokenCreator`）のロールが必要です。スプレッドシートは `local-dev-sa` に共有しておきます。`GOOGLE_APPLICATION_CREDENTIALS` は設定せず、`google-key.json` も置かないでください（どちらかがあると鍵ファイルが優先されます）。
 
 ### 起動
 
