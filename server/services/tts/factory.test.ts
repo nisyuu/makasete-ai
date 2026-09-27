@@ -31,13 +31,13 @@ describe('getTTSService factory', () => {
         vi.clearAllMocks();
     });
 
-    it('should return the Gemini service by default', async () => {
+    it('should return the Cloud TTS (Chirp 3: HD) service for "gemini"', async () => {
         const getTTSService = await loadFactory('gemini');
         expect(getTTSService().getName()).toBe('gemini-tts');
         expect(GeminiCtor).toHaveBeenCalledTimes(1);
     });
 
-    it('should return the Gemini Flash TTS service when configured', async () => {
+    it('should return the Gemini Flash TTS service for "gemini-flash-tts"', async () => {
         const getTTSService = await loadFactory('gemini-flash-tts');
         expect(getTTSService().getName()).toBe('gemini-flash-tts');
         expect(GeminiFlashCtor).toHaveBeenCalledTimes(1);

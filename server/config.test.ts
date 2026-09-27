@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { resolveIntEnv } from './config';
+import { resolveIntEnv, resolveTtsProvider } from './config';
 
 describe('resolveIntEnv', () => {
     afterEach(() => {
@@ -30,5 +30,29 @@ describe('resolveIntEnv', () => {
         expect(resolveIntEnv('X', 'abc', 5, 1, 10)).toBe(5);
         expect(resolveIntEnv('X', '1.5', 5, 1, 10)).toBe(5);
         expect(warnSpy).toHaveBeenCalledTimes(2);
+    });
+});
+
+describe('resolveTtsProvider', () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it('should default to Gemini Flash TTS when unset or empty', () => {
+        // platform のデプロイは環境変数を丸ごと置き換えるので、未設定のときの値が本番の値になる
+        expect(resolveTtsProvider(undefined)).toBe('gemini-flash-tts');
+        expect(resolveTtsProvider('')).toBe('gemini-flash-tts');
+    });
+
+    it('should accept every supported provider', () => {
+        expect(resolveTtsProvider('gemini')).toBe('gemini');
+        expect(resolveTtsProvider('gemini-flash-tts')).toBe('gemini-flash-tts');
+        expect(resolveTtsProvider('elevenlabs')).toBe('elevenlabs');
+    });
+
+    it('should warn and fall back to the default for an unknown value', () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        expect(resolveTtsProvider('chirp')).toBe('gemini-flash-tts');
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('Falling back to "gemini-flash-tts"'));
     });
 });
