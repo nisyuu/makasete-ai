@@ -6,3 +6,8 @@ export interface Product {
   url: string;
   tags: string;
 }
+
+/** サーバーがヘッダ無しの PCM（16bit・リトルエンディアン・モノラル）で音声を送るときの形式 */
+export interface PcmFormat {
+  sampleRate: number;
+}

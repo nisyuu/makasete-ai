@@ -19,6 +19,13 @@ import { resolveLanguage } from "../utils/language";
 /** リクエスト ID を付けて応答イベントを送る関数 */
 type EmitFn = (event: string, payload?: Record<string, unknown>) => void;
 
+const XML_ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
+
+/** XML の実体参照を元の文字に戻す。順に置換すると &amp;lt; が < まで戻りすぎるので、1回の置換で処理する。 */
+function decodeXmlEntities(text: string): string {
+  return text.replace(/&(amp|lt|gt|quot|apos);/g, (_, name: string) => XML_ENTITIES[name]);
+}
+
 /**
  * クライアントが付けたリクエスト ID を検証する。
  * 任意の値をそのまま送り返すと巨大なペイロードの反射に使われうるので、
@@ -171,7 +178,9 @@ export class ChatService {
                   console.error("[TTS] Failed to discard stream:", message);
                 });
             }
-            return this.drainStreamToSocket(emit, streamPromise);
+            return ttsService.pcmSampleRate
+              ? this.forwardPcmStreamToSocket(emit, streamPromise, ttsService.pcmSampleRate)
+              : this.drainStreamToSocket(emit, streamPromise);
           });
         } else {
           emit("text-chunk", { content: uiText });
@@ -308,8 +317,55 @@ export class ChatService {
     });
   }
 
+  // ヘッダ無しの PCM は断片ごとに単独で再生できるので、MP3 のように文全体を待たずに届いた順に送る。
+  // これで最初の音が出るまでが TTS の生成完了ではなく最初の断片の到着で決まる。
+  // 16bit のサンプルが断片の境目で割れると、それ以降の音がすべてノイズになる。奇数バイトは次の断片に持ち越す。
+  private async forwardPcmStreamToSocket(
+    emit: EmitFn,
+    streamPromise: Promise<NodeJS.ReadableStream | null>,
+    sampleRate: number,
+  ): Promise<void> {
+    const audioStream = await streamPromise;
+    if (!audioStream) return;
+
+    await new Promise<void>((resolve) => {
+      let carry: Buffer = Buffer.alloc(0);
+
+      audioStream.on("data", (chunk: Buffer) => {
+        const data = carry.length > 0 ? Buffer.concat([carry, chunk]) : chunk;
+        const evenLength = data.length - (data.length % 2);
+        carry = data.subarray(evenLength);
+        if (evenLength > 0) {
+          emit("audio-chunk", {
+            type: "audio",
+            content: data.subarray(0, evenLength),
+            format: "pcm_s16le",
+            sampleRate,
+          });
+        }
+      });
+
+      audioStream.on("end", () => resolve());
+
+      audioStream.on("error", (err) => {
+        console.error("[TTS] Stream error:", err);
+        resolve(); // Continue to next sentence rather than aborting the chain
+      });
+
+      audioStream.resume();
+    });
+  }
+
   // Prepares the TTS input string, applying SSML pause tuning for Google TTS.
   private prepareTTSInput(sentence: string, ttsProviderName: string): string | null {
+    // Gemini の音声生成モデルは SSML を解釈せず、タグや &amp; などの実体参照まで読み上げてしまう。
+    // cleanupForTTS は SSML 向けに & を &amp; にするので、それも戻してプレーンテキストで渡す。
+    if (ttsProviderName === "gemini-flash-tts") {
+      const plain = isSsml(sentence) ? decodeXmlEntities(sentence.replace(/<[^>]*>/g, "")) : sentence;
+      const text = decodeXmlEntities(cleanupForTTS(plain)).trim();
+      return text || null;
+    }
+
     // すでに SSML として組み立てられた文だけを素通しする。
     // `hasTags` は `<[^>]*>` に一致するだけなので、LLM が出力した「A<B>C」や「<br>」でも真になり、無エスケープのまま <speak> に包まれて TTS の SSML パースエラーを招く（その文だけ音声が無言になる）。
     // 先頭が <speak> の場合に限定し、それ以外は必ずエスケープ経路へ送る。
