@@ -239,6 +239,8 @@ describe('initAudioHandler', () => {
 
             handler.beginResponse();
             handler.handleAudioChunk(new Uint8Array([0, 0]), { sampleRate: 24000 });
+            // 短い PCM は溜めてから鳴らすので、次の断片を待つ時間が過ぎてから予約される
+            await new Promise((r) => setTimeout(r, 200));
             expect(createdSources).toHaveLength(1);
         });
 
@@ -290,10 +292,36 @@ describe('initAudioHandler', () => {
             samples.forEach((v, i) => view.setInt16(i * 2, v, true));
             return view.buffer;
         };
+        // 0.25 秒ごとに 30ms の無音を挟む、発話を模した波形（24kHz）
+        const speech = (seconds: number) =>
+            Array.from({ length: Math.round(seconds * 24000) }, (_, i) =>
+                i % 6000 < 720 ? 0 : Math.round(16000 * Math.sin((2 * Math.PI * 220 * i) / 24000)),
+            );
+        // 波形を 40ms ずつの断片にして順に渡す（Gemini Flash TTS の断片の長さ）
+        const feed = (handler: ReturnType<typeof setup>['handler'], samples: number[]) => {
+            for (let i = 0; i < samples.length; i += 960) {
+                handler.handleAudioChunk(pcm(samples.slice(i, i + 960)), { sampleRate: 24000 });
+            }
+        };
+        const flushPcm = () => vi.advanceTimersByTime(200);
+        const segments = () =>
+            createdSources.map((s) => ({
+                start: s.start.mock.calls[0][0] as number,
+                buffer: s.buffer as MockAudioBuffer,
+            }));
+
+        beforeEach(() => {
+            vi.useFakeTimers();
+        });
+
+        afterEach(() => {
+            vi.useRealTimers();
+        });
 
         it('should convert 16-bit PCM to floats without decodeAudioData', () => {
             const { handler } = setup();
             handler.handleAudioChunk(pcm([0, 16384, -32768]), { sampleRate: 24000 });
+            flushPcm();
 
             expect(ctx().decodeAudioData).not.toHaveBeenCalled();
             expect(ctx().createBuffer).toHaveBeenCalledWith(1, 3, 24000);
@@ -301,63 +329,105 @@ describe('initAudioHandler', () => {
             expect([...buffer.getChannelData(0)]).toEqual([0, 0.5, -1]);
         });
 
-        it('should schedule consecutive chunks back to back without gaps', () => {
+        it('should group small chunks into a few segments', () => {
+            // iOS Safari は短い AudioBuffer を並べると継ぎ目ごとにプツッと鳴るので、継ぎ目を減らす
+            const { handler } = setup();
+            feed(handler, speech(4)); // 40ms × 100 断片
+            flushPcm();
+
+            expect(createdSources.length).toBeGreaterThan(1);
+            expect(createdSources.length).toBeLessThanOrEqual(8);
+            const total = segments().reduce((n, s) => n + s.buffer.length, 0);
+            expect(total).toBe(4 * 24000);
+        });
+
+        it('should place segments back to back without gaps', () => {
             const { handler } = setup();
             handler.initAudioContext();
             ctx().currentTime = 1;
+            feed(handler, speech(4));
+            flushPcm();
 
-            handler.handleAudioChunk(pcm(new Array(2400).fill(0)), { sampleRate: 24000 }); // 0.1秒
-            handler.handleAudioChunk(pcm(new Array(4800).fill(0)), { sampleRate: 24000 }); // 0.2秒
-            handler.handleAudioChunk(pcm(new Array(2400).fill(0)), { sampleRate: 24000 });
-
-            const starts = createdSources.map((s) => s.start.mock.calls[0][0] as number);
-            expect(starts[0]).toBe(1);
-            expect(starts[1]).toBeCloseTo(1.1);
-            expect(starts[2]).toBeCloseTo(1.3);
+            const segs = segments();
+            expect(segs[0].start).toBe(1);
+            for (let i = 1; i < segs.length; i++) {
+                expect(segs[i].start).toBeCloseTo(segs[i - 1].start + segs[i - 1].buffer.length / 24000, 9);
+            }
         });
 
-        it('should start immediately when the previous chunk has already finished', () => {
+        it('should put seams in the pauses between phrases', () => {
+            const { handler } = setup();
+            feed(handler, speech(4));
+            flushPcm();
+
+            const segs = segments();
+            for (let i = 0; i < segs.length - 1; i++) {
+                const data = segs[i].buffer.getChannelData(0);
+                const next = segs[i + 1].buffer.getChannelData(0);
+                // 継ぎ目の前後 5ms が無音
+                expect(Math.max(...data.subarray(data.length - 120).map(Math.abs))).toBe(0);
+                expect(Math.max(...next.subarray(0, 120).map(Math.abs))).toBe(0);
+            }
+        });
+
+        it('should start playing after a short first segment without waiting for the whole response', () => {
+            const { handler } = setup();
+            feed(handler, speech(0.4));
+
+            // タイマーを進めなくても最初の区間は予約される
+            expect(createdSources).toHaveLength(1);
+            expect(createdSources[0].buffer).toBeInstanceOf(MockAudioBuffer);
+            expect((createdSources[0].buffer as MockAudioBuffer).length).toBeLessThanOrEqual(0.4 * 24000);
+        });
+
+        it('should play what is left once the chunks stop arriving', () => {
+            const { handler } = setup();
+            handler.handleAudioChunk(pcm(new Array(2400).fill(0)), { sampleRate: 24000 }); // 0.1秒
+            expect(createdSources).toHaveLength(0);
+
+            flushPcm();
+            expect(createdSources).toHaveLength(1);
+        });
+
+        it.each([48000, 44100])('should resample to the output rate (%i)', (outRate) => {
+            // 出力のレートへの変換をブラウザに任せず、断片をつなげたまま変換する
+            const { handler } = setup();
+            handler.initAudioContext();
+            ctx().sampleRate = outRate;
+            ctx().currentTime = 1;
+            feed(handler, speech(2));
+            flushPcm();
+
+            for (const call of ctx().createBuffer.mock.calls) {
+                expect(call[2]).toBe(outRate);
+            }
+            const segs = segments();
+            expect(Math.abs(segs[0].start * outRate - Math.round(segs[0].start * outRate))).toBeLessThan(1e-6);
+            for (let i = 1; i < segs.length; i++) {
+                expect(segs[i].start).toBeCloseTo(segs[i - 1].start + segs[i - 1].buffer.length / outRate, 9);
+            }
+            const total = segs.reduce((n, s) => n + s.buffer.length, 0);
+            expect(Math.abs(total - 2 * outRate)).toBeLessThanOrEqual(2);
+        });
+
+        it('should start immediately when the previous segment has already finished', () => {
             const { handler } = setup();
             handler.initAudioContext();
             handler.handleAudioChunk(pcm(new Array(2400).fill(0)), { sampleRate: 24000 });
-            // 文の合間などで前の断片が鳴り終わってから次が届いた
+            flushPcm();
+            // 前の区間が鳴り終わってから次が届いた
             ctx().currentTime = 5;
             handler.handleAudioChunk(pcm(new Array(2400).fill(0)), { sampleRate: 24000 });
+            flushPcm();
 
             expect(createdSources[1].start).toHaveBeenCalledWith(5);
         });
-
-        it.each([48000, 44100])(
-            'should resample to the output rate (%i) and place chunks on exact sample boundaries',
-            (outRate) => {
-                // iOS Safari は 24kHz の断片を出力のレートへ断片ごとに変換し、継ぎ目がプツプツという雑音になる。
-                // ウィジェット側で出力のレートに変換し、整数サンプル分ずつ隙間なく並べる。
-                const { handler } = setup();
-                handler.initAudioContext();
-                ctx().sampleRate = outRate;
-                ctx().currentTime = 1;
-
-                handler.handleAudioChunk(pcm(new Array(960).fill(1000)), { sampleRate: 24000 }); // 40ms
-                handler.handleAudioChunk(pcm(new Array(1920).fill(1000)), { sampleRate: 24000 }); // 80ms
-
-                for (const call of ctx().createBuffer.mock.calls) {
-                    expect(call[2]).toBe(outRate);
-                }
-                const buffers = createdSources.map((s) => s.buffer as MockAudioBuffer);
-                const starts = createdSources.map((s) => s.start.mock.calls[0][0] as number);
-                // 2つ目は1つ目がちょうど鳴り終わるサンプルから始まる
-                expect(starts[1]).toBeCloseTo(starts[0] + buffers[0].length / outRate, 9);
-                expect(Math.abs(starts[0] * outRate - Math.round(starts[0] * outRate))).toBeLessThan(1e-6);
-                // 合計の長さは入力の 120ms 分（補間用に持ち越す1サンプルを除く）
-                const total = buffers.reduce((n, b) => n + b.length, 0);
-                expect(Math.abs(total - 0.12 * outRate)).toBeLessThanOrEqual(2);
-            },
-        );
 
         it('should drop a trailing odd byte and ignore empty chunks', () => {
             const { handler } = setup();
             handler.handleAudioChunk(new Uint8Array([0, 64, 9]), { sampleRate: 24000 });
             handler.handleAudioChunk(new Uint8Array([9]), { sampleRate: 24000 });
+            flushPcm();
 
             expect(ctx().createBuffer).toHaveBeenCalledTimes(1);
             expect(ctx().createBuffer).toHaveBeenCalledWith(1, 1, 24000);
@@ -368,30 +438,36 @@ describe('initAudioHandler', () => {
             const { handler } = setup();
             const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
             handler.handleAudioChunk(pcm([1]), { sampleRate: 1 });
+            flushPcm();
 
             expect(createdSources).toHaveLength(0);
             expect(errSpy).toHaveBeenCalled();
         });
 
-        it('should stop scheduled chunks and restart the timeline on reset', () => {
+        it('should stop scheduled segments, drop pending audio and restart the timeline on reset', () => {
             const { handler } = setup();
             handler.initAudioContext();
-            handler.handleAudioChunk(pcm(new Array(2400).fill(0)), { sampleRate: 24000 });
-            handler.handleAudioChunk(pcm(new Array(2400).fill(0)), { sampleRate: 24000 });
+            feed(handler, speech(0.5));
+            const scheduled = createdSources.length;
+            expect(scheduled).toBeGreaterThan(0);
 
             handler.beginResponse();
-            expect(createdSources[0].stop).toHaveBeenCalled();
-            expect(createdSources[1].stop).toHaveBeenCalled();
+            for (const s of createdSources) expect(s.stop).toHaveBeenCalled();
+            // 溜まっていた前の応答の残りは鳴らさない
+            flushPcm();
+            expect(createdSources).toHaveLength(scheduled);
 
             // リセット後の新しい応答は、古い予約の後ろではなく今から鳴らす
             ctx().currentTime = 0.05;
             handler.handleAudioChunk(pcm(new Array(2400).fill(0)), { sampleRate: 24000 });
-            expect(createdSources[2].start).toHaveBeenCalledWith(0.05);
+            flushPcm();
+            expect(createdSources[scheduled].start).toHaveBeenCalledWith(0.05);
         });
 
-        it('should not stop chunks that have already ended on reset', () => {
+        it('should not stop segments that have already ended on reset', () => {
             const { handler } = setup();
             handler.handleAudioChunk(pcm([0]), { sampleRate: 24000 });
+            flushPcm();
             createdSources[0].onended?.();
 
             handler.resetAudioState();
@@ -402,6 +478,7 @@ describe('initAudioHandler', () => {
             const { handler } = setup();
             handler.toggleRecording();
             handler.handleAudioChunk(pcm([0]), { sampleRate: 24000 });
+            flushPcm();
 
             expect(createdSources).toHaveLength(0);
         });
