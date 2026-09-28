@@ -55,6 +55,7 @@ class MockAudioBuffer {
 class MockAudioContext {
     state: 'running' | 'suspended' = 'suspended';
     currentTime = 0;
+    sampleRate = 24000;
     destination = {};
     createBuffer = vi.fn((channels: number, length: number, sampleRate: number) => {
         if (sampleRate < 3000) throw new Error('NotSupportedError');
@@ -325,6 +326,33 @@ describe('initAudioHandler', () => {
 
             expect(createdSources[1].start).toHaveBeenCalledWith(5);
         });
+
+        it.each([48000, 44100])(
+            'should resample to the output rate (%i) and place chunks on exact sample boundaries',
+            (outRate) => {
+                // iOS Safari は 24kHz の断片を出力のレートへ断片ごとに変換し、継ぎ目がプツプツという雑音になる。
+                // ウィジェット側で出力のレートに変換し、整数サンプル分ずつ隙間なく並べる。
+                const { handler } = setup();
+                handler.initAudioContext();
+                ctx().sampleRate = outRate;
+                ctx().currentTime = 1;
+
+                handler.handleAudioChunk(pcm(new Array(960).fill(1000)), { sampleRate: 24000 }); // 40ms
+                handler.handleAudioChunk(pcm(new Array(1920).fill(1000)), { sampleRate: 24000 }); // 80ms
+
+                for (const call of ctx().createBuffer.mock.calls) {
+                    expect(call[2]).toBe(outRate);
+                }
+                const buffers = createdSources.map((s) => s.buffer as MockAudioBuffer);
+                const starts = createdSources.map((s) => s.start.mock.calls[0][0] as number);
+                // 2つ目は1つ目がちょうど鳴り終わるサンプルから始まる
+                expect(starts[1]).toBeCloseTo(starts[0] + buffers[0].length / outRate, 9);
+                expect(Math.abs(starts[0] * outRate - Math.round(starts[0] * outRate))).toBeLessThan(1e-6);
+                // 合計の長さは入力の 120ms 分（補間用に持ち越す1サンプルを除く）
+                const total = buffers.reduce((n, b) => n + b.length, 0);
+                expect(Math.abs(total - 0.12 * outRate)).toBeLessThanOrEqual(2);
+            },
+        );
 
         it('should drop a trailing odd byte and ignore empty chunks', () => {
             const { handler } = setup();
