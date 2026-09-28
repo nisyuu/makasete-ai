@@ -1,4 +1,9 @@
 import type { PcmFormat } from "../types";
+import { createPcmResampler } from "./pcmResampler";
+
+// AudioContext.createBuffer が受け付けるサンプルレートの範囲
+const MIN_SAMPLE_RATE = 3000;
+const MAX_SAMPLE_RATE = 768000;
 
 interface BufferData {
   type: "Buffer";
@@ -64,6 +69,8 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
   // AudioContext の時計で前の断片の終わる時刻に次を予約し、隙間なく並べる。
   const pcmSources = new Set<AudioBufferSourceNode>();
   let pcmNextStartTime = 0;
+  // 出力のサンプルレートへの変換を断片の境目をまたいで続けるための状態
+  const pcmResampler = createPcmResampler();
 
   // 音声認識
   let recognition: SpeechRecognition | null = null;
@@ -164,18 +171,30 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
     const sampleCount = Math.floor(rawData.byteLength / 2);
     if (sampleCount === 0) return;
 
-    let audioBuffer: AudioBuffer;
-    try {
-      audioBuffer = audioContext.createBuffer(1, sampleCount, sampleRate);
-    } catch (e) {
-      console.error("[MakaseteAI] Unsupported PCM sample rate:", e);
+    // 変換後の長さは入力のサンプルレートに比例するので、Web Audio が扱える範囲外の値は変換する前に弾く
+    if (sampleRate < MIN_SAMPLE_RATE || sampleRate > MAX_SAMPLE_RATE) {
+      console.error("[MakaseteAI] Unsupported PCM sample rate:", sampleRate);
       return;
     }
-    const channel = audioBuffer.getChannelData(0);
+
+    const samples = new Float32Array(sampleCount);
     const view = new DataView(rawData);
     for (let i = 0; i < sampleCount; i++) {
-      channel[i] = view.getInt16(i * 2, true) / 32768;
+      samples[i] = view.getInt16(i * 2, true) / 32768;
     }
+
+    const outRate = audioContext.sampleRate;
+    const resampled = pcmResampler.process(samples, sampleRate, outRate);
+    if (resampled.length === 0) return;
+
+    let audioBuffer: AudioBuffer;
+    try {
+      audioBuffer = audioContext.createBuffer(1, resampled.length, outRate);
+    } catch (e) {
+      console.error("[MakaseteAI] Failed to create PCM buffer:", e);
+      return;
+    }
+    audioBuffer.getChannelData(0).set(resampled);
 
     const source = audioContext.createBufferSource();
     source.buffer = audioBuffer;
@@ -184,10 +203,14 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
       pcmSources.delete(source);
     };
 
-    // 前の断片がもう鳴り終わっていれば（文の合間など）すぐに鳴らす
-    const startAt = Math.max(audioContext.currentTime, pcmNextStartTime);
+    // 前の断片がもう鳴り終わっていれば（応答の始まりなど）すぐに鳴らす。
+    // 開始時刻を出力のサンプル境界にそろえ、以後の断片も整数サンプル分ずつ並べて継ぎ目に隙間や重なりを作らない。
+    const startAt =
+      pcmNextStartTime > audioContext.currentTime
+        ? pcmNextStartTime
+        : Math.ceil(audioContext.currentTime * outRate) / outRate;
     source.start(startAt);
-    pcmNextStartTime = startAt + audioBuffer.duration;
+    pcmNextStartTime = startAt + resampled.length / outRate;
     pcmSources.add(source);
   }
 
@@ -259,6 +282,7 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
     }
     pcmSources.clear();
     pcmNextStartTime = 0;
+    pcmResampler.reset();
   }
 
   // --- 音声認識 ---
