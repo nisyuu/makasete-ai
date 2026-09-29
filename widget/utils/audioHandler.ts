@@ -438,21 +438,46 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
 
     rec.onend = () => {
       isRecording = false;
-      // onRecordingEnd の中で質問を送り読み上げが始まるので、その前に再生用のモードへ戻す
-      setAudioSessionType("playback");
       // 発話が確定したテキストを一度だけ確定通知する
       const text = finalTranscript.trim();
       finalTranscript = "";
+      // onRecordingEnd の中で質問を送り読み上げが始まるので、その前にマイクを手放して再生用のモードへ戻す
+      releaseRecognition(rec);
+      setAudioSessionType("playback");
       onRecordingEnd(text);
     };
 
     rec.onerror = (event: SpeechRecognitionErrorEvent) => {
       isRecording = false;
-      setAudioSessionType("playback");
       finalTranscript = "";
+      releaseRecognition(rec);
+      setAudioSessionType("playback");
       onRecordingEnd("");
       onError?.(new Error(event.error));
     };
+  }
+
+  /**
+   * 終わった音声認識を捨て、次の録音用に作り直す。
+   *
+   * iOS Safari は音声認識が終わってもマイクを掴んだままにすることがある（画面右上のオレンジの点が消えない）。
+   * マイクを使っている間は iOS が通話向けのモードのままになり、ページの音はすべて雑音が乗る。
+   * abort() で明示的に止め、同じインスタンスを使い回さずに手放す。
+   */
+  function releaseRecognition(rec: SpeechRecognition): void {
+    // abort() が onend / onerror を再び発火させても、確定通知を二重に行わないようにハンドラを外す
+    rec.onresult = null;
+    rec.onend = null;
+    rec.onerror = null;
+    try {
+      rec.abort();
+    } catch {
+      // すでに止まっていれば何もしない
+    }
+    if (recognition === rec) {
+      recognition = null;
+      initSpeechRecognition();
+    }
   }
 
   function toggleRecording(): boolean {
@@ -491,12 +516,16 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
   function cleanup(): void {
     resetAudioState();
     if (recognition) {
+      const rec = recognition;
+      recognition = null;
+      rec.onresult = null;
+      rec.onend = null;
+      rec.onerror = null;
       try {
-        recognition.stop();
+        rec.abort();
       } catch {
         // 無視
       }
-      recognition = null;
     }
     if (audioContext) {
       audioContext.close().catch(() => {});
