@@ -41,6 +41,8 @@
 <label><input type="checkbox" id="switchSession" checked> 音声モードを切り替える（録音前 play-and-record → 終了後 playback、#324 と同じ）</label>
 <label><input type="checkbox" id="releaseMic" checked> 認識が終わったら abort() でマイクを手放す（オレンジの点が消えるか確認する）</label>
 <button id="mic" class="mic">マイクで話す</button>
+<button id="gumRelease" class="mic">A. マイクを一瞬だけ取得してすぐ止める（getUserMedia）</button>
+<button id="gumRecord" class="mic">B. 音声認識を使わずに3秒録音する（getUserMedia + MediaRecorder）</button>
 
 <h2>その他</h2>
 <button id="recreate" class="util">AudioContext を作り直す</button>
@@ -205,6 +207,45 @@
   };
 
   document.getElementById("stop").onclick = () => { stopAll(); log("停止"); };
+
+  // 音声認識の後に掴まれたままのマイクを、getUserMedia で取り直してすぐ止めることで解放できるか
+  document.getElementById("gumRelease").onclick = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((t) => t.stop());
+      if (navigator.audioSession && document.getElementById("switchSession").checked) navigator.audioSession.type = "playback";
+      log("A. getUserMedia で取得して止めた");
+    } catch (e) {
+      log(`A. getUserMedia に失敗: ${e}`);
+    }
+  };
+
+  // 音声認識（Web Speech API）を使わずに録音した場合も、マイクが掴まれたままになるか
+  document.getElementById("gumRecord").onclick = async () => {
+    stopAll();
+    getContext();
+    const switchSession = document.getElementById("switchSession").checked;
+    if (switchSession && navigator.audioSession) navigator.audioSession.type = "play-and-record";
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      const chunks = [];
+      recorder.ondataavailable = (e) => chunks.push(e.data);
+      recorder.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        if (switchSession && navigator.audioSession) navigator.audioSession.type = "playback";
+        micUsed = true;
+        const size = chunks.reduce((n, c) => n + c.size, 0);
+        log(`B. 録音終了（${size} バイト、${recorder.mimeType}）。マイクのトラックは停止済み`);
+      };
+      recorder.start();
+      log("B. 録音開始（3秒）");
+      setTimeout(() => recorder.stop(), 3000);
+    } catch (e) {
+      if (switchSession && navigator.audioSession) navigator.audioSession.type = "playback";
+      log(`B. 録音に失敗: ${e}`);
+    }
+  };
 
   const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
   document.getElementById("mic").onclick = () => {
