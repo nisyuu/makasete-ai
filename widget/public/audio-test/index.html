@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>読み上げ雑音テスト</title>
+<!--
+  iPhone Safari で読み上げに雑音が乗る問題の切り分け用ページ（調査が終わったら削除する）。
+  同じ TTS 音声（Gemini Flash TTS の出力、24kHz・16bit PCM）を鳴らし方だけ変えて、マイクを使う前と後で聞き比べる。
+-->
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; margin: 0; padding: 16px; background: #fff; color: #111; line-height: 1.5; }
+  h1 { font-size: 18px; margin: 0 0 8px; }
+  h2 { font-size: 15px; margin: 20px 0 8px; }
+  button { display: block; width: 100%; margin: 6px 0; padding: 12px; font-size: 15px; border: 1px solid #888; border-radius: 8px; background: #f4f4f4; color: #111; text-align: left; }
+  button.mic { background: #ffe9e9; }
+  button.util { background: #eef3ff; }
+  pre { font-size: 12px; background: #f4f4f4; padding: 8px; border-radius: 8px; white-space: pre-wrap; word-break: break-all; }
+  ol { padding-left: 20px; }
+  label { display: block; margin: 8px 0; font-size: 14px; }
+</style>
+</head>
+<body>
+<h1>読み上げ雑音テスト</h1>
+<ol>
+  <li>マイクを使う前に 1〜5 を順に鳴らし、雑音の有無をメモする</li>
+  <li>「マイクで話す」を押して何か話す</li>
+  <li>もう一度 1〜5 を鳴らす</li>
+  <li>「AudioContext を作り直す」を押してから、1〜4 をもう一度鳴らす</li>
+  <li>最後に下の「状態」欄をスクリーンショットで送る</li>
+</ol>
+
+<h2>再生テスト</h2>
+<button id="t1">1. サイン波（Web Audio・1本のバッファ）</button>
+<button id="t2">2. TTS 音声（Web Audio・decodeAudioData で1本、Chirp の頃と同じ鳴らし方）</button>
+<button id="t3">3. TTS 音声（Web Audio・40ms 断片を時刻指定で並べる、#313 の鳴らし方）</button>
+<button id="t4">4. TTS 音声（Web Audio・出力レートに変換して2秒区間で並べる、今の鳴らし方）</button>
+<button id="t5">5. TTS 音声（audio 要素で WAV を再生、Web Audio を使わない）</button>
+
+<h2>マイク</h2>
+<label><input type="checkbox" id="switchSession" checked> 音声モードを切り替える（録音前 play-and-record → 終了後 playback、#324 と同じ）</label>
+<button id="mic" class="mic">マイクで話す</button>
+
+<h2>その他</h2>
+<button id="recreate" class="util">AudioContext を作り直す</button>
+<button id="stop" class="util">再生を止める</button>
+
+<h2>状態</h2>
+<pre id="info"></pre>
+<pre id="log"></pre>
+
+<script>
+(() => {
+  const SAMPLE_RATE = 24000;
+  const logEl = document.getElementById("log");
+  const infoEl = document.getElementById("info");
+  let ctx = null;
+  let contextCount = 0;
+  let micUsed = false;
+  let pcm = null; // Float32Array（24kHz）
+  let wavBytes = null;
+  const sources = new Set();
+  let audioEl = null;
+
+  function log(msg) {
+    const t = new Date().toLocaleTimeString();
+    logEl.textContent = `[${t}] ${msg}\n` + logEl.textContent;
+    showInfo();
+  }
+
+  function showInfo() {
+    const session = navigator.audioSession;
+    infoEl.textContent = [
+      `UA: ${navigator.userAgent}`,
+      `AudioContext: ${ctx ? `#${contextCount} state=${ctx.state} sampleRate=${ctx.sampleRate} baseLatency=${ctx.baseLatency} outputLatency=${ctx.outputLatency}` : "未作成"}`,
+      `audioSession.type: ${session ? session.type : "API なし"}`,
+      `マイク使用: ${micUsed ? "後" : "前"}`,
+    ].join("\n");
+  }
+
+  function getContext() {
+    if (!ctx) {
+      const C = window.AudioContext || window.webkitAudioContext;
+      ctx = new C();
+      contextCount++;
+      log(`AudioContext #${contextCount} を作成 sampleRate=${ctx.sampleRate}`);
+    }
+    if (ctx.state !== "running" && ctx.state !== "closed") ctx.resume();
+    return ctx;
+  }
+
+  function stopAll() {
+    for (const s of sources) { try { s.stop(); } catch (e) {} }
+    sources.clear();
+    if (audioEl) { audioEl.pause(); audioEl = null; }
+  }
+
+  function play(buffer, when) {
+    const c = getContext();
+    const s = c.createBufferSource();
+    s.buffer = buffer;
+    s.connect(c.destination);
+    s.onended = () => { sources.delete(s); s.disconnect(); };
+    s.start(when);
+    sources.add(s);
+  }
+
+  async function loadSample() {
+    if (pcm) return;
+    const res = await fetch("sample.wav");
+    wavBytes = await res.arrayBuffer();
+    const view = new DataView(wavBytes, 44);
+    const n = Math.floor(view.byteLength / 2);
+    pcm = new Float32Array(n);
+    for (let i = 0; i < n; i++) pcm[i] = view.getInt16(i * 2, true) / 32768;
+  }
+
+  // 線形補間でつなげたまま outRate に変換する（ウィジェットの pcmResampler と同じ）
+  function resample(input, inRate, outRate) {
+    if (inRate === outRate) return input;
+    const step = inRate / outRate;
+    const out = new Float32Array(Math.floor((input.length - 1) / step));
+    for (let k = 0; k < out.length; k++) {
+      const pos = k * step;
+      const i = Math.floor(pos);
+      out[k] = input[i] + (input[i + 1] - input[i]) * (pos - i);
+    }
+    return out;
+  }
+
+  document.getElementById("t1").onclick = () => {
+    stopAll();
+    const c = getContext();
+    const len = c.sampleRate * 3;
+    const b = c.createBuffer(1, len, c.sampleRate);
+    const d = b.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = 0.3 * Math.sin((2 * Math.PI * 440 * i) / c.sampleRate);
+    play(b, 0);
+    log("1. サイン波を再生");
+  };
+
+  document.getElementById("t2").onclick = async () => {
+    stopAll();
+    const c = getContext();
+    await loadSample();
+    const b = await c.decodeAudioData(wavBytes.slice(0));
+    play(b, 0);
+    log(`2. decodeAudioData で再生（バッファ ${b.sampleRate}Hz）`);
+  };
+
+  document.getElementById("t3").onclick = async () => {
+    stopAll();
+    const c = getContext();
+    await loadSample();
+    const chunk = SAMPLE_RATE * 0.04;
+    let t = c.currentTime + 0.05;
+    let count = 0;
+    for (let off = 0; off < pcm.length; off += chunk) {
+      const part = pcm.subarray(off, off + chunk);
+      const b = c.createBuffer(1, part.length, SAMPLE_RATE);
+      b.getChannelData(0).set(part);
+      play(b, t);
+      t += b.duration;
+      count++;
+    }
+    log(`3. 40ms 断片 ${count} 個を時刻指定で再生`);
+  };
+
+  document.getElementById("t4").onclick = async () => {
+    stopAll();
+    const c = getContext();
+    await loadSample();
+    const rate = c.sampleRate;
+    const all = resample(pcm, SAMPLE_RATE, rate);
+    const seg = rate * 2;
+    let t = Math.ceil((c.currentTime + 0.05) * rate) / rate;
+    let count = 0;
+    for (let off = 0; off < all.length; off += seg) {
+      const part = all.subarray(off, off + seg);
+      const b = c.createBuffer(1, part.length, rate);
+      b.getChannelData(0).set(part);
+      play(b, t);
+      t += part.length / rate;
+      count++;
+    }
+    log(`4. ${rate}Hz に変換して 2 秒区間 ${count} 個を時刻指定で再生`);
+  };
+
+  document.getElementById("t5").onclick = async () => {
+    stopAll();
+    audioEl = new Audio("sample.wav");
+    try {
+      await audioEl.play();
+      log("5. audio 要素で再生");
+    } catch (e) {
+      log(`5. audio 要素の再生に失敗: ${e}`);
+    }
+  };
+
+  document.getElementById("recreate").onclick = async () => {
+    stopAll();
+    if (ctx) { try { await ctx.close(); } catch (e) {} ctx = null; }
+    getContext();
+  };
+
+  document.getElementById("stop").onclick = () => { stopAll(); log("停止"); };
+
+  const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
+  document.getElementById("mic").onclick = () => {
+    if (!Rec) { log("このブラウザは音声認識に対応していません"); return; }
+    stopAll();
+    getContext();
+    const switchSession = document.getElementById("switchSession").checked;
+    const rec = new Rec();
+    rec.lang = "ja-JP";
+    rec.continuous = false;
+    rec.interimResults = true;
+    const done = (msg) => {
+      if (switchSession && navigator.audioSession) navigator.audioSession.type = "playback";
+      micUsed = true;
+      log(msg);
+    };
+    rec.onresult = (e) => {
+      const r = e.results[e.results.length - 1];
+      if (r.isFinal) log(`認識結果: ${r[0].transcript}`);
+    };
+    rec.onend = () => done("マイク終了");
+    rec.onerror = (e) => done(`マイクのエラー: ${e.error}`);
+    if (switchSession && navigator.audioSession) navigator.audioSession.type = "play-and-record";
+    try {
+      rec.start();
+      log("マイク開始（話してください）");
+    } catch (e) {
+      done(`マイクの開始に失敗: ${e}`);
+    }
+  };
+
+  showInfo();
+})();
+</script>
+</body>
+</html>
