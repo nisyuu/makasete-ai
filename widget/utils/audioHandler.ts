@@ -17,6 +17,26 @@ const PCM_FLUSH_DELAY_MS = 120;
 const PCM_QUIET_WINDOW_SEC = 0.01;
 const PCM_QUIET_PEAK = 0.02;
 
+// Audio Session API（iOS 16.4 以降の Safari）。DOM の型定義にまだ無いので、使う分だけ定義する。
+type AudioSessionType = "auto" | "playback" | "transient" | "transient-solo" | "ambient" | "play-and-record";
+
+/**
+ * iOS の音声の動作モード（オーディオセッション）を指定する。対応していないブラウザでは何もしない。
+ *
+ * iOS はマイクを使うと録音と再生を同時に行うモードに切り替わり、Safari はマイクを止めても戻さない。
+ * そのモードのまま Web Audio で読み上げると、以後ずっと声に雑音が乗る。
+ * 録音の前後でモードを明示して、読み上げは再生用のモードで鳴らす。
+ */
+function setAudioSessionType(type: AudioSessionType): void {
+  const session = (navigator as Navigator & { audioSession?: { type: AudioSessionType } }).audioSession;
+  if (!session) return;
+  try {
+    session.type = type;
+  } catch {
+    // 設定できない環境では従来どおりブラウザに任せる
+  }
+}
+
 interface BufferData {
   type: "Buffer";
   data: number[];
@@ -418,6 +438,8 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
 
     rec.onend = () => {
       isRecording = false;
+      // onRecordingEnd の中で質問を送り読み上げが始まるので、その前に再生用のモードへ戻す
+      setAudioSessionType("playback");
       // 発話が確定したテキストを一度だけ確定通知する
       const text = finalTranscript.trim();
       finalTranscript = "";
@@ -426,6 +448,7 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
 
     rec.onerror = (event: SpeechRecognitionErrorEvent) => {
       isRecording = false;
+      setAudioSessionType("playback");
       finalTranscript = "";
       onRecordingEnd("");
       onError?.(new Error(event.error));
@@ -446,12 +469,14 @@ export function initAudioHandler(options: AudioHandlerOptions): AudioHandler {
     // ボットの音声がテキスト化されて入力欄に入る」問題を防ぐ。
     resetAudioState();
     finalTranscript = "";
+    setAudioSessionType("play-and-record");
     try {
       recognition.start();
     } catch (e) {
       // すでに開始済み等で start() が失敗した場合は録音状態にしない。
       // （ボタン表示と実状態がずれるのを防ぐ）
       isRecording = false;
+      setAudioSessionType("playback");
       onError?.(e instanceof Error ? e : new Error(String(e)));
       return false;
     }
