@@ -565,6 +565,76 @@ describe('initAudioHandler', () => {
         });
     });
 
+    describe('audio session (iOS)', () => {
+        // iOS はマイクを使うと録音と再生を同時に行うモードのままになり、以後の読み上げに雑音が乗る
+        let session: { type: string };
+
+        beforeEach(() => {
+            session = { type: 'auto' };
+            Object.defineProperty(navigator, 'audioSession', { value: session, configurable: true });
+        });
+
+        afterEach(() => {
+            delete (navigator as unknown as { audioSession?: unknown }).audioSession;
+        });
+
+        it('should switch to play-and-record before recognition starts', () => {
+            const { handler } = setup();
+            const rec = createdRecognitions[0];
+            let typeAtStart = '';
+            rec.start.mockImplementationOnce(() => {
+                typeAtStart = session.type;
+            });
+
+            handler.toggleRecording();
+            expect(typeAtStart).toBe('play-and-record');
+        });
+
+        it('should switch back to playback before the recognized text is sent', () => {
+            let typeWhenSent = '';
+            const { handler } = setup({
+                onRecordingEnd: vi.fn(() => {
+                    typeWhenSent = session.type;
+                }),
+            });
+            const rec = createdRecognitions[0];
+
+            handler.toggleRecording();
+            rec.onend!();
+            // 質問の送信（= 読み上げの開始）より前に再生用のモードへ戻っている
+            expect(typeWhenSent).toBe('playback');
+        });
+
+        it('should switch back to playback on a recognition error', () => {
+            const { handler } = setup();
+            const rec = createdRecognitions[0];
+
+            handler.toggleRecording();
+            rec.onerror!({ error: 'no-speech' });
+            expect(session.type).toBe('playback');
+        });
+
+        it('should switch back to playback when recognition fails to start', () => {
+            const { handler } = setup();
+            const rec = createdRecognitions[0];
+            rec.start.mockImplementationOnce(() => {
+                throw new Error('InvalidStateError');
+            });
+
+            handler.toggleRecording();
+            expect(session.type).toBe('playback');
+        });
+
+        it('should keep working when the browser has no audio session API', () => {
+            delete (navigator as unknown as { audioSession?: unknown }).audioSession;
+            const { handler } = setup();
+            const rec = createdRecognitions[0];
+
+            expect(handler.toggleRecording()).toBe(true);
+            expect(() => rec.onend!()).not.toThrow();
+        });
+    });
+
     describe('speech recognition', () => {
         it('should report support correctly', () => {
             const { handler } = setup();
