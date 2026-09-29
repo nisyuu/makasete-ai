@@ -39,6 +39,7 @@
 
 <h2>マイク</h2>
 <label><input type="checkbox" id="switchSession" checked> 音声モードを切り替える（録音前 play-and-record → 終了後 playback、#324 と同じ）</label>
+<label><input type="checkbox" id="releaseMic" checked> 認識が終わったら abort() でマイクを手放す（オレンジの点が消えるか確認する）</label>
 <button id="mic" class="mic">マイクで話す</button>
 
 <h2>その他</h2>
@@ -211,11 +212,19 @@
     stopAll();
     getContext();
     const switchSession = document.getElementById("switchSession").checked;
+    const releaseMic = document.getElementById("releaseMic").checked;
     const rec = new Rec();
     rec.lang = "ja-JP";
     rec.continuous = false;
     rec.interimResults = true;
     const done = (msg) => {
+      if (releaseMic) {
+        rec.onresult = null;
+        rec.onend = null;
+        rec.onerror = null;
+        try { rec.abort(); } catch (e) {}
+        msg += "（abort 済み）";
+      }
       if (switchSession && navigator.audioSession) navigator.audioSession.type = "playback";
       micUsed = true;
       log(msg);
