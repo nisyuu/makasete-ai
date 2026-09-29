@@ -91,6 +91,7 @@ class MockRecognition {
     onerror: ((e: unknown) => void) | null = null;
     start = vi.fn();
     stop = vi.fn();
+    abort = vi.fn();
     constructor() {
         createdRecognitions.push(this);
     }
@@ -565,6 +566,64 @@ describe('initAudioHandler', () => {
         });
     });
 
+    describe('releasing the microphone (iOS)', () => {
+        // iOS Safari は音声認識が終わってもマイクを掴んだままにし、その間ページの音すべてに雑音が乗る
+
+        it('should abort the finished recognition before the recognized text is sent', () => {
+            let abortedWhenSent = false;
+            const { handler } = setup({
+                onRecordingEnd: vi.fn(() => {
+                    abortedWhenSent = createdRecognitions[0].abort.mock.calls.length > 0;
+                }),
+            });
+            const rec = createdRecognitions[0];
+
+            handler.toggleRecording();
+            rec.onresult!(makeResultEvent(0, [{ transcript: 'こんにちは', isFinal: true }]));
+            rec.onend!();
+            expect(abortedWhenSent).toBe(true);
+        });
+
+        it('should use a new recognition for the next recording', () => {
+            const { handler } = setup();
+            const first = createdRecognitions[0];
+
+            handler.toggleRecording();
+            first.onend!();
+            handler.toggleRecording();
+
+            expect(createdRecognitions).toHaveLength(2);
+            expect(first.start).toHaveBeenCalledTimes(1);
+            expect(createdRecognitions[1].start).toHaveBeenCalledTimes(1);
+        });
+
+        it('should report the end only once even if abort fires more events', () => {
+            const { handler, opts } = setup();
+            const rec = createdRecognitions[0];
+            // abort() が onend を発火させる実装でも二重に送らない
+            rec.abort.mockImplementation(() => rec.onend?.());
+
+            handler.toggleRecording();
+            rec.onresult!(makeResultEvent(0, [{ transcript: 'こんにちは', isFinal: true }]));
+            rec.onend!();
+            expect(opts.onRecordingEnd).toHaveBeenCalledTimes(1);
+        });
+
+        it('should report the end only once when an error is followed by end', () => {
+            const { handler, opts } = setup();
+            const rec = createdRecognitions[0];
+            const onend = rec.onend!;
+
+            handler.toggleRecording();
+            rec.onerror!({ error: 'no-speech' });
+            // エラーの後に届く onend はハンドラを外してあるので無視される
+            expect(rec.onend).toBeNull();
+            expect(onend).toBeTypeOf('function');
+            expect(opts.onRecordingEnd).toHaveBeenCalledTimes(1);
+            expect(rec.abort).toHaveBeenCalled();
+        });
+    });
+
     describe('audio session (iOS)', () => {
         // iOS はマイクを使うと録音と再生を同時に行うモードのままになり、以後の読み上げに雑音が乗る
         let session: { type: string };
@@ -772,10 +831,11 @@ describe('initAudioHandler', () => {
             rec.onresult!(makeResultEvent(0, [{ transcript: 'こんにちは', isFinal: true }]));
             rec.onend!();
 
-            // 新しい録音を開始すると蓄積はクリアされる
+            // 新しい録音を開始すると蓄積はクリアされる（録音ごとに新しい認識を使う）
             handler.toggleRecording();
-            rec.onresult!(makeResultEvent(0, [{ transcript: 'さようなら', isFinal: true }]));
-            rec.onend!();
+            const next = createdRecognitions[1];
+            next.onresult!(makeResultEvent(0, [{ transcript: 'さようなら', isFinal: true }]));
+            next.onend!();
 
             expect(opts.onRecordingEnd).toHaveBeenLastCalledWith('さようなら');
         });
@@ -806,7 +866,7 @@ describe('initAudioHandler', () => {
             handler.initAudioContext();
             const rec = createdRecognitions[0];
             handler.cleanup();
-            expect(rec.stop).toHaveBeenCalled();
+            expect(rec.abort).toHaveBeenCalled();
         });
     });
 });
